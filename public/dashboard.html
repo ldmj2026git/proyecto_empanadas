@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard Admin Unificado - Panel de Gestión</title>
+    <style>
+        :root {
+            --primary: #2c3e50;
+            --accent: #3498db;
+            --success: #27ae60;
+            --danger: #e74c3c;
+            --warning: #f39c12;
+            --bg: #f8f9fa;
+        }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: var(--bg); margin: 0; padding: 25px; color: #333; }
+        .container { max-width: 1100px; margin: 0 auto; background: white; padding: 25px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
+        
+        /* Encabezado e información de perfil */
+        .top-bar { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #eee; padding-bottom: 15px; margin-bottom: 20px; flex-wrap: wrap; gap: 10px; }
+        h1 { margin: 0; color: var(--primary); font-size: 1.7rem; }
+        .user-badge { background: #e2e8f0; padding: 6px 14px; border-radius: 20px; font-size: 0.85rem; font-weight: bold; color: #475569; }
+
+        /* Selector de Local y Fecha */
+        .selector-header { background: #eef2f7; padding: 15px; border-radius: 8px; margin-bottom: 20px; display: flex; gap: 20px; align-items: flex-end; flex-wrap: wrap; }
+        .form-group { flex: 1; min-width: 220px; }
+        label { font-weight: bold; display: block; margin-bottom: 5px; font-size: 0.9rem; }
+        select, input[type="text"], input[type="date"], input[type="number"] { width: 100%; padding: 9px; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; font-size: 14px; }
+
+        /* Pestañas */
+        .tabs { display: flex; gap: 10px; border-bottom: 2px solid #ddd; margin-bottom: 20px; flex-wrap: wrap; }
+        .tab-btn { padding: 12px 18px; border: none; background: none; cursor: pointer; font-weight: bold; font-size: 15px; color: #666; border-bottom: 3px solid transparent; }
+        .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+
+        /* Tablas */
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; background: white; }
+        th, td { border: 1px solid #e2e8f0; padding: 10px 12px; text-align: left; vertical-align: middle; }
+        th { background: #f1f5f9; color: #475569; font-weight: 600; }
+
+        /* Switches / Toggle */
+        .switch { position: relative; display: inline-block; width: 44px; height: 22px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .3s; border-radius: 22px; }
+        .slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 3px; bottom: 3px; background-color: white; transition: .3s; border-radius: 50%; }
+        input:checked + .slider { background-color: var(--success); }
+        input:checked + .slider:before { transform: translateX(22px); }
+
+        /* Botones */
+        .btn { padding: 9px 15px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; transition: 0.2s; display: inline-flex; align-items: center; gap: 6px; font-size: 14px; }
+        .btn-primary { background: var(--accent); color: white; }
+        .btn-success { background: var(--success); color: white; }
+        .btn-warning { background: var(--warning); color: #212529; }
+        .btn-danger { background: var(--danger); color: white; }
+        .btn-secondary { background: #6c757d; color: white; }
+        .btn:hover { opacity: 0.9; }
+
+        .instrucciones { background: #e8f4fd; border: 1px solid #b6e0fe; color: #084298; padding: 12px 15px; border-radius: 6px; font-size: 0.9rem; margin-bottom: 15px; }
+
+        #mensaje { margin-bottom: 15px; padding: 12px; border-radius: 6px; display: none; font-weight: bold; }
+        .msg-exito { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .msg-error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+
+        .acciones-finales { display: flex; gap: 12px; margin-top: 20px; flex-wrap: wrap; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <!-- ENCABEZADO Y ROL -->
+    <div class="top-bar">
+        <h1>⚙️ Dashboard de Administración</h1>
+        <div id="userInfo" class="user-badge">Cargando perfil...</div>
+    </div>
+
+    <!-- SELECCIÓN DE LOCAL Y FECHA DE TRABAJO -->
+    <div class="selector-header">
+        <!-- Visible para Dueño de Empresa / Oculto para Admin de Local -->
+        <div class="form-group" id="grupoSelectLocal">
+            <label for="selectLocal">Sucursal / Local:</label>
+            <select id="selectLocal" onchange="alCambiarLocal()">
+                <option value="">-- Cargando sucursales... --</option>
+            </select>
+        </div>
+
+        <!-- Mostrar únicamente cuando el Admin de Local está bloqueado a su sucursal -->
+        <div class="form-group" id="grupoLocalFijo" style="display: none;">
+            <label>Sucursal Asignada:</label>
+            <input type="text" id="nombreLocalFijo" readonly style="background: #e9ecef; font-weight: bold; color: #495057;">
+        </div>
+
+        <div class="form-group">
+            <label for="fechaFiltro">Fecha para Gestión de Horarios:</label>
+            <input type="date" id="fechaFiltro" onchange="cargarHorarios()">
+        </div>
+    </div>
+
+    <div id="mensaje"></div>
+
+    <!-- PESTAÑAS -->
+    <div class="tabs">
+        <button class="tab-btn active" onclick="cambiarTab('tabOcr', this)">📷 Escáner de Menú (OCR)</button>
+        <button class="tab-btn" onclick="cambiarTab('tabStock', this)">📦 Precios y Stock</button>
+        <button class="tab-btn" onclick="cambiarTab('tabHorarios', this)">⏰ Horarios (30 min)</button>
+    </div>
+
+    <!-- PESTAÑA 1: ESCÁNER DE MENÚ (OCR) -->
+    <div id="tabOcr" class="tab-content active">
+        <h2>📷 Adaptación e Importación de Carta por OCR</h2>
+        <div class="instrucciones">
+            💡 <strong>¿Cómo funciona?</strong> Ingrese la dirección URL de la imagen del menú. El escáner extraerá los nombres y precios automáticamente para su revisión.
+        </div>
+
+        <div class="form-group" style="margin-bottom: 15px;">
+            <label for="urlImagen">En este apartado ingrese la url/link de la imagen del menú que quiere adaptar:</label>
+            <input type="text" id="urlImagen" placeholder="https://ejemplo.com/uploads/menu-carta.jpg">
+        </div>
+
+        <button class="btn btn-primary" onclick="escanearImagenOCR()" id="btnEscanear">🔍 1. Escanear e Interpretar Imagen</button>
+
+        <div id="seccionTablaOcr" style="display: none; margin-top: 25px;">
+            <hr style="border: 0; border-top: 1px solid #ddd; margin-bottom: 20px;">
+            <h3>2. Revisión y Edición de Productos Detectados</h3>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>Nombre del Producto</th>
+                        <th style="width: 140px;">Precio ($)</th>
+                        <th style="width: 110px;">Stock Inicial</th>
+                        <th style="width: 70px;">Acción</th>
+                    </tr>
+                </thead>
+                <tbody id="cuerpoTablaOcr">
+                    <!-- Filas dinámicas -->
+                </tbody>
+            </table>
+
+            <div style="margin-top: 15px;">
+                <button class="btn btn-secondary" onclick="agregarFilaVaciaOcr()">+ Agregar Producto Manual</button>
+            </div>
+
+            <div class="acciones-finales">
+                <button class="btn btn-warning" onclick="guardarMenuOCR('borrador')">🟡 Guardar como Borrador</button>
+                <button class="btn btn-success" onclick="guardarMenuOCR('publicado')">🟢 Confirmar y Publicar en MongoDB</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- PESTAÑA 2: MODIFICAR PRECIOS Y STOCK -->
+    <div id="tabStock" class="tab-content">
+        <h2>📦 Control Diario de Inventario y Precios</h2>
+        <p>Ajuste el precio, el stock disponible o inhabilite productos de la carta:</p>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>Producto</th>
+                    <th style="width: 140px;">Precio ($)</th>
+                    <th style="width: 120px;">Stock</th>
+                    <th style="width: 110px;">Disponible</th>
+                    <th style="width: 100px;">Acción</th>
+                </tr>
+            </thead>
+            <tbody id="tablaStock">
+                <!-- Carga dinámica -->
+            </tbody>
+        </table>
+    </div>
+
+    <!-- PESTAÑA 3: HABILITAR / BLOQUEAR HORARIOS -->
+    <div id="tabHorarios" class="tab-content">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 15px;">
+            <div>
+                <h2 style="margin: 0;">⏰ Gestión de Bloques (10:00 - 20:00 hrs)</h2>
+                <small style="color: #666;">Interválos de 30 minutos para retiro y delivery.</small>
+            </div>
+            <button class="btn btn-warning" onclick="generarJornadaCompleta()">⚡ Generar / Resetear Jornada (10:00 - 20:00)</button>
+        </div>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>Bloque Horario (30 min)</th>
+                    <th>Capacidad Máxima</th>
+                    <th>Reservas</th>
+                    <th>Estado del Bloque</th>
+                    <th>Guardar</th>
+                </tr>
+            </thead>
+            <tbody id="tablaHorarios">
+                <!-- Carga dinámica -->
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+    let moduloActual = 'tabOcr';
+    let productosOcrDetectados = [];
+
+    // Variables de sesión y rol
+    let rolUsuario = 'admin_empresa'; // 'admin_empresa' (Dueño) u 'operador_local' (Admin Local)
+    let localIdAsignado = null;
+
+    document.getElementById('fechaFiltro').value = new Date().toISOString().split('T')[0];
+
+    // Detectar rol y parámetros desde la URL (Ej: dashboard.html?rol=operador_local&localId=64b8f1...)
+    function inicializarSesion() {
+        const params = new URLSearchParams(window.location.search);
+        
+        if (params.has('rol')) {
+            rolUsuario = params.get('rol');
+        }
+        if (params.has('localId')) {
+            localIdAsignado = params.get('localId');
+        }
+
+        const badge = document.getElementById('userInfo');
+
+        if (rolUsuario === 'operador_local' && localIdAsignado) {
+            badge.textContent = '👤 Rol: Admin de Local';
+            document.getElementById('grupoSelectLocal').style.display = 'none';
+            document.getElementById('grupoLocalFijo').style.display = 'block';
+            cargarDatosLocalUnico(localIdAsignado);
+        } else {
+            badge.textContent = '👑 Rol: Dueño de Empresa';
+            document.getElementById('grupoSelectLocal').style.display = 'block';
+            document.getElementById('grupoLocalFijo').style.display = 'none';
+            cargarListaLocales();
+        }
+    }
+
+    // Cargar locales para el Dueño de Empresa
+    async function cargarListaLocales() {
+        try {
+            const res = await fetch('/api/locales');
+            const locales = await res.json();
+            const select = document.getElementById('selectLocal');
+            select.innerHTML = '';
+
+            locales.forEach(l => {
+                const opt = document.createElement('option');
+                opt.value = l._id;
+                opt.textContent = `${l.nombre} (${l.direccion})`;
+                select.appendChild(opt);
+            });
+
+            if (locales.length > 0) {
+                select.value = locales[0]._id;
+                alCambiarLocal();
+            }
+        } catch (e) {
+            mostrarMensaje('Error al obtener locales.', false);
+        }
+    }
+
+    // Cargar datos de la sucursal asignada al Admin de Local
+    async function cargarDatosLocalUnico(id) {
+        try {
+            const res = await fetch('/api/locales');
+            const locales = await res.json();
+            const local = locales.find(l => l._id === id);
+
+            if (local) {
+                document.getElementById('nombreLocalFijo').value = `${local.nombre} - ${local.direccion}`;
+            } else {
+                document.getElementById('nombreLocalFijo').value = `Local ID: ${id}`;
+            }
+            alCambiarLocal();
+        } catch (e) {
+            alCambiarLocal();
+        }
+    }
+
+    function obtenerLocalIdActual() {
+        if (rolUsuario === 'operador_local' && localIdAsignado) {
+            return localIdAsignado;
+        }
+        return document.getElementById('selectLocal').value;
+    }
+
+    function alCambiarLocal() {
+        cargarDatosModuloActual();
+    }
+
+    function cambiarTab(tabId, btn) {
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+
+        btn.classList.add('active');
+        document.getElementById(tabId).classList.add('active');
+        moduloActual = tabId;
+
+        cargarDatosModuloActual();
+    }
+
+    function cargarDatosModuloActual() {
+        if (moduloActual === 'tabStock') {
+            cargarProductosStock();
+        } else if (moduloActual === 'tabHorarios') {
+            cargarHorarios();
+        }
+    }
+
+    // ==========================================
+    // 1. MÓDULO OCR (ESCÁNER DE MENÚ)
+    // ==========================================
+    async function escanearImagenOCR() {
+        const urlImagen = document.getElementById('urlImagen').value.trim();
+        const btn = document.getElementById('btnEscanear');
+
+        if (!urlImagen) {
+            mostrarMensaje('Por favor ingrese una URL de imagen.', false);
+            return;
+        }
+
+        btn.disabled = true;
+        btn.innerText = '⏳ Procesando OCR con Tesseract... Espere...';
+
+        try {
+            const res = await fetch('/api/productos/escanear-menu', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ urlImagen })
+            });
+
+            const data = await res.json();
+
+            if (res.ok) {
+                productosOcrDetectados = data.productos;
+                renderizarTablaOCR();
+                document.getElementById('seccionTablaOcr').style.display = 'block';
+                mostrarMensaje(`¡Procesado! Se detectaron ${data.totalDetectados} productos.`, true);
+            } else {
+                mostrarMensaje(data.mensaje || 'Error al escanear.', false);
+            }
+        } catch (e) {
+            mostrarMensaje('Error de conexión con el servidor OCR.', false);
+        } finally {
+            btn.disabled = false;
+            btn.innerText = '🔍 1. Escanear e Interpretar Imagen';
+        }
+    }
+
+    function renderizarTablaOCR() {
+        const tbody = document.getElementById('cuerpoTablaOcr');
+        tbody.innerHTML = '';
+
+        productosOcrDetectados.forEach((prod, index) => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td><input type="text" value="${prod.nombre}" class="ocr-nombre"></td>
+                <td><input type="number" value="${prod.precio}" class="ocr-precio"></td>
+                <td><input type="number" value="${prod.stock || 10}" class="ocr-stock"></td>
+                <td><button class="btn btn-danger" onclick="eliminarFilaOcr(${index})">🗑️</button></td>
+            `;
+            tbody.appendChild(tr);
+        });
+    }
+
+    function agregarFilaVaciaOcr() {
+        productosOcrDetectados.push({ nombre: '', precio: 0, stock: 10 });
+        renderizarTablaOCR();
+    }
+
+    function eliminarFilaOcr(index) {
+        productosOcrDetectados.splice(index, 1);
+        renderizarTablaOCR();
+    }
+
+    async function guardarMenuOCR(estado) {
+        const localId = obtenerLocalIdActual();
+        if (!localId) {
+            mostrarMensaje('No hay un local seleccionado.', false);
+            return;
+        }
+
+        const filas = document.querySelectorAll('#cuerpoTablaOcr tr');
+        const productosAEnviar = [];
+
+        filas.forEach(fila => {
+            const nombre = fila.querySelector('.ocr-nombre').value;
+            const precio = Number(fila.querySelector('.ocr-precio').value);
+            const stock = Number(fila.querySelector('.ocr-stock').value);
+
+            if (nombre.trim() !== '') {
+                productosAEnviar.push({ nombre, precio, stock });
+            }
+        });
+
+        if (productosAEnviar.length === 0) {
+            mostrarMensaje('No hay productos válidos en la tabla para guardar.', false);
+            return;
+        }
+
+        try {
+            const res = await fetch('/api/productos/guardar-menu', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ localId, productos: productosAEnviar, estado })
+            });
+
+            const data = await res.json();
+            if (res.ok) {
+                mostrarMensaje(data.mensaje, true);
+            } else {
+                mostrarMensaje(data.mensaje || 'Error al guardar el menú.', false);
+            }
+        } catch (e) {
+            mostrarMensaje('Error de red al guardar el menú.', false);
+        }
+    }
+
+    // ==========================================
+    // 2. MÓDULO PRECIOS Y STOCK
+    // ==========================================
+    async function cargarProductosStock() {
+        const localId = obtenerLocalIdActual();
+        if (!localId) return;
+
+        const res = await fetch(`/api/productos?localId=${localId}&incluirInactivos=true`);
+        const productos = await res.json();
+
+        const tbody = document.getElementById('tablaStock');
+        tbody.innerHTML = '';
+
+        if (productos.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5">No existen productos registrados en este local.</td></tr>';
+            return;
+        }
+
+        productos.forEach(p => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td><strong>${p.nombre}</strong><br><small style="color:#666">${p.descripcion || ''}</small></td>
+                <td><input type="number" id="precio_${p._id}" value="${p.precio}" min="0" step="100"></td>
+                <td><input type="number" id="stock_${p._id}" value="${p.stock}" min="0"></td>
+                <td>
+                    <label class="switch">
+                        <input type="checkbox" id="activo_${p._id}" ${p.activo ? 'checked' : ''}>
+                        <span class="slider"></span>
+                    </label>
+                </td>
+                <td>
+                    <button class="btn btn-success" onclick="actualizarProducto('${p._id}')">💾 Guardar</button>
+                </td>
+            `;
+            tbody.appendChild(tr);
+        });
+    }
+
+    async function actualizarProducto(productoId) {
+        const precio = document.getElementById(`precio_${productoId}`).value;
+        const stock = document.getElementById(`stock_${productoId}`).value;
+        const activo = document.getElementById(`activo_${productoId}`).checked;
+
+        try {
+            const res = await fetch(`/api/productos/${productoId}/stock`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ precio, stock, activo })
+            });
+
+            const data = await res.json();
+            if (res.ok) {
+                mostrarMensaje(data.mensaje, true);
+            } else {
+                mostrarMensaje(data.mensaje || 'Error al actualizar.', false);
+            }
+        } catch (e) {
+            mostrarMensaje('Error de conexión al actualizar.', false);
+        }
+    }
+
+    // ==========================================
+    // 3. MÓDULO BLOQUES HORARIOS
+    // ==========================================
+    async function cargarHorarios() {
+        const localId = obtenerLocalIdActual();
+        const fecha = document.getElementById('fechaFiltro').value;
+        if (!localId || !fecha) return;
+
+        const res = await fetch(`/api/horarios/admin?localId=${localId}&fecha=${fecha}`);
+        const horarios = await res.json();
+
+        const tbody = document.getElementById('tablaHorarios');
+        tbody.innerHTML = '';
+
+        if (!horarios || horarios.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="5" style="text-align: center; padding: 20px;">
+                        No existen bloques configurados para esta fecha.<br><br>
+                        <button class="btn btn-warning" onclick="generarJornadaCompleta()">⚡ Generar Bloques (10:00 a 20:00)</button>
+                    </td>
+                </tr>`;
+            return;
+        }
+
+        horarios.forEach(h => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td><strong>${h.horaInicio} - ${h.horaFin} hrs</strong></td>
+                <td><input type="number" id="capacidad_${h._id}" value="${h.capacidad}" min="1" style="width: 90px;"></td>
+                <td><span style="font-weight:bold;">${h.reservadas} / ${h.capacidad}</span></td>
+                <td>
+                    <label class="switch">
+                        <input type="checkbox" id="activo_horario_${h._id}" ${h.activo !== false ? 'checked' : ''}>
+                        <span class="slider"></span>
+                    </label>
+                    <span style="font-size: 0.85rem; margin-left: 8px;">${h.activo !== false ? 'Habilitado' : 'Bloqueado'}</span>
+                </td>
+                <td>
+                    <button class="btn btn-primary" onclick="actualizarBloqueHorario('${h._id}')">💾 Guardar</button>
+                </td>
+            `;
+            tbody.appendChild(tr);
+        });
+    }
+
+    async function generarJornadaCompleta() {
+        const localId = obtenerLocalIdActual();
+        const fecha = document.getElementById('fechaFiltro').value;
+        if (!localId || !fecha) {
+            mostrarMensaje('Seleccione un local y una fecha válida.', false);
+            return;
+        }
+
+        try {
+            const res = await fetch('/api/horarios/generar-jornada', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ localId, fecha, capacidadInicial: 5 })
+            });
+
+            const data = await res.json();
+            if (res.ok) {
+                mostrarMensaje(data.mensaje, true);
+                cargarHorarios();
+            } else {
+                mostrarMensaje(data.mensaje || 'Error al generar la jornada.', false);
+            }
+        } catch (e) {
+            mostrarMensaje('Error de conexión.', false);
+        }
+    }
+
+    async function actualizarBloqueHorario(horarioId) {
+        const capacidad = document.getElementById(`capacidad_${horarioId}`).value;
+        const activo = document.getElementById(`activo_horario_${horarioId}`).checked;
+
+        try {
+            const res = await fetch(`/api/horarios/${horarioId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ capacidad, activo })
+            });
+
+            const data = await res.json();
+            if (res.ok) {
+                mostrarMensaje(data.mensaje, true);
+                cargarHorarios();
+            } else {
+                mostrarMensaje(data.mensaje || 'Error al actualizar bloque.', false);
+            }
+        } catch (e) {
+            mostrarMensaje('Error de conexión.', false);
+        }
+    }
+
+    function mostrarMensaje(texto, esExito) {
+        const div = document.getElementById('mensaje');
+        div.textContent = texto;
+        div.className = esExito ? 'msg-exito' : 'msg-error';
+        div.style.display = 'block';
+        setTimeout(() => { div.style.display = 'none'; }, 3500);
+    }
+
+    // Arrancar la vista
+    inicializarSesion();
+</script>
+
+</body>
+</html>

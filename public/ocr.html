@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Panel Admin - Adaptador y Escáner de Menús</title>
+    <style>
+        :root {
+            --primary: #007bff;
+            --success: #28a745;
+            --warning: #ffc107;
+            --danger: #dc3545;
+            --bg: #f4f6f9;
+        }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: var(--bg); margin: 30px; color: #333; }
+        .container { max-width: 950px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.08); }
+        
+        h1 { color: #2c3e50; margin-top: 0; margin-bottom: 5px; }
+        p.subtitulo { color: #666; margin-top: 0; margin-bottom: 25px; }
+
+        .seccion-card { background: #f8f9fa; border-left: 5px solid var(--primary); padding: 20px; border-radius: 6px; margin-bottom: 20px; }
+        .seccion-card h2 { margin-top: 0; font-size: 1.15rem; color: #2c3e50; }
+
+        .form-group { margin-bottom: 15px; }
+        label { display: block; font-weight: bold; margin-bottom: 6px; }
+        select, input[type="text"], input[type="number"] { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; font-size: 14px; }
+        
+        .instrucciones { background: #e8f4fd; border: 1px solid #b6e0fe; color: #084298; padding: 12px 15px; border-radius: 6px; font-size: 0.9rem; margin-bottom: 15px; }
+        
+        .btn { padding: 11px 18px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 14px; transition: background 0.2s; }
+        .btn-primary { background-color: var(--primary); color: white; }
+        .btn-warning { background-color: var(--warning); color: #212529; }
+        .btn-success { background-color: var(--success); color: white; }
+        .btn-danger { background-color: var(--danger); color: white; padding: 6px 10px; }
+        .btn-secondary { background-color: #6c757d; color: white; }
+        .btn:hover { opacity: 0.9; }
+
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; background: white; }
+        th, td { border: 1px solid #e0e0e0; padding: 10px; text-align: left; }
+        th { background-color: #f1f3f5; color: #495057; }
+        
+        .acciones-finales { display: flex; gap: 15px; margin-top: 25px; flex-wrap: wrap; }
+        #mensaje { margin-top: 15px; padding: 12px 15px; border-radius: 6px; display: none; font-weight: bold; }
+        .exito { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .error { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>📷 Panel Admin - Escáner y Adaptador de Menús</h1>
+    <p class="subtitulo">Convierta imágenes de cartas en productos estructurados de MongoDB, revíselos y gestione borradores por sucursal.</p>
+
+    <!-- PASO 1: SELECCIÓN DE LOCAL -->
+    <div class="seccion-card">
+        <h2>Paso 1: Selección del Local</h2>
+        <div class="form-group">
+            <label for="localId">Escoja local:</label>
+            <select id="localId" onchange="cargarProductosDelLocal()">
+                <option value="">-- Cargando sucursales... --</option>
+            </select>
+        </div>
+    </div>
+
+    <!-- PASO 2: INGRESO DE URL E IMAGEN -->
+    <div class="seccion-card">
+        <h2>Paso 2: Ingrese la Imagen de la Carta</h2>
+        <div class="instrucciones">
+            💡 <strong>¿Cómo funciona?</strong> Copie y pegue la dirección web de la imagen del menú. El OCR extraerá automáticamente los títulos y precios.
+        </div>
+        <div class="form-group">
+            <label for="urlImagen">En este apartado ingrese la url/link de la imagen del menú que quiere adaptar:</label>
+            <input type="text" id="urlImagen" placeholder="https://ejemplo.com/uploads/menu-sushi.jpg">
+        </div>
+        <button class="btn btn-primary" onclick="escanearImagen()" id="btnEscanear">🔍 1. Escanear e Interpretar Imagen</button>
+    </div>
+
+    <div id="mensaje"></div>
+
+    <!-- PASO 3: TABLA INTERACTIVA -->
+    <div id="seccionTabla" style="display: none;" class="seccion-card">
+        <h2>Paso 3: Revisión y Limpieza de Productos</h2>
+        <div class="instrucciones">
+            ✏️ <strong>Sugerencia del sistema:</strong> Limpie cualquier carácter extraño extraído por el OCR (ejemplo: <code>|</code>, <code>]</code>, <code>-</code>) y ajuste los precios antes de guardar.
+        </div>
+
+        <table id="tablaProductos">
+            <thead>
+                <tr>
+                    <th>Nombre y Descripción del Producto</th>
+                    <th style="width: 140px;">Precio ($)</th>
+                    <th style="width: 110px;">Stock Initial</th>
+                    <th style="width: 80px;">Acción</th>
+                </tr>
+            </thead>
+            <tbody id="cuerpoTabla">
+                <!-- Se llena dinámicamente con JavaScript -->
+            </tbody>
+        </table>
+
+        <div style="margin-top: 15px;">
+            <button class="btn btn-secondary" onclick="agregarFilaVacia()">+ Agregar Producto Manualmente</button>
+        </div>
+
+        <div class="acciones-finales">
+            <button class="btn btn-warning" onclick="guardarEnMongo('borrador')">🟡 Guardar como Borrador</button>
+            <button class="btn btn-success" onclick="guardarEnMongo('publicado')">🟢 Confirmar y Publicar en MongoDB</button>
+        </div>
+    </div>
+</div>
+
+<script>
+let productosDetectados = [];
+
+// Cargar la lista de locales desde MongoDB al abrir la página
+async function cargarLocales() {
+    try {
+        const respuesta = await fetch('/api/locales');
+        const locales = await respuesta.json();
+        const select = document.getElementById('localId');
+        select.innerHTML = '';
+
+        if (locales.length === 0) {
+            select.innerHTML = '<option value="">No hay locales registrados</option>';
+            return;
+        }
+
+        locales.forEach(local => {
+            const option = document.createElement('option');
+            option.value = local._id;
+            option.textContent = `${local.nombre} (${local.direccion || 'Sin dirección'})`;
+            select.appendChild(option);
+        });
+
+        // Cargar productos del primer local de la lista
+        cargarProductosDelLocal();
+
+    } catch (error) {
+        mostrarMensaje('Error al conectar para obtener la lista de locales.', 'error');
+    }
+}
+
+// Cargar productos o borrador existente al cambiar de local
+async function cargarProductosDelLocal() {
+    const localId = document.getElementById('localId').value;
+    if (!localId) return;
+
+    try {
+        const respuesta = await fetch(`/api/productos?localId=${localId}&incluirInactivos=true`);
+        const productosBD = await respuesta.json();
+
+        if (productosBD && productosBD.length > 0) {
+            productosDetectados = productosBD.map(p => ({
+                nombre: p.nombre,
+                precio: p.precio,
+                stock: p.stock
+            }));
+            renderizarTabla();
+            document.getElementById('seccionTabla').style.display = 'block';
+            mostrarMensaje(`Se cargaron los productos existentes/borrador del local seleccionado.`, 'exito');
+        }
+    } catch (error) {
+        console.log('Sin productos previamente guardados para este local.');
+    }
+}
+
+// 1. Enviar la imagen al backend para ser procesada por Tesseract.js
+async function escanearImagen() {
+    const urlImagen = document.getElementById('urlImagen').value.trim();
+    const btn = document.getElementById('btnEscanear');
+    
+    if (!urlImagen) {
+        mostrarMensaje('Por favor ingrese la URL de una imagen en el apartado correspondiente.', 'error');
+        return;
+    }
+
+    btn.disabled = true;
+    btn.innerText = '⏳ Procesando OCR... Espere un momento...';
+    ocultarMensaje();
+
+    try {
+        const respuesta = await fetch('/api/productos/escanear-menu', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ urlImagen })
+        });
+
+        const data = await respuesta.json();
+
+        if (respuesta.ok) {
+            productosDetectados = data.productos;
+            renderizarTabla();
+            document.getElementById('seccionTabla').style.display = 'block';
+            mostrarMensaje(`¡Lectura exitosa! Se detectaron ${data.totalDetectados} productos. Revíselos en la tabla.`, 'exito');
+        } else {
+            mostrarMensaje(data.mensaje || 'Error al procesar la imagen.', 'error');
+        }
+    } catch (error) {
+        mostrarMensaje('Error de conexión con el servidor backend.', 'error');
+    } finally {
+        btn.disabled = false;
+        btn.innerText = '🔍 1. Escanear e Interpretar Imagen';
+    }
+}
+
+// 2. Renderizar la tabla interactiva con los productos
+function renderizarTabla() {
+    const cuerpo = document.getElementById('cuerpoTabla');
+    cuerpo.innerHTML = '';
+
+    productosDetectados.forEach((prod, index) => {
+        const fila = document.createElement('tr');
+        fila.innerHTML = `
+            <td><input type="text" value="${prod.nombre}" class="input-nombre" placeholder="Nombre del producto"></td>
+            <td><input type="number" value="${prod.precio}" class="input-precio"></td>
+            <td><input type="number" value="${prod.stock !== undefined ? prod.stock : 10}" class="input-stock"></td>
+            <td><button class="btn btn-danger" onclick="eliminarFila(${index})">🗑️</button></td>
+        `;
+        cuerpo.appendChild(fila);
+    });
+}
+
+function agregarFilaVacia() {
+    productosDetectados.push({ nombre: '', precio: 0, stock: 10 });
+    renderizarTabla();
+}
+
+function eliminarFila(index) {
+    productosDetectados.splice(index, 1);
+    renderizarTabla();
+}
+
+// 3. Guardar en MongoDB (Borrador o Publicado)
+async function guardarEnMongo(estado) {
+    const localId = document.getElementById('localId').value;
+
+    if (!localId) {
+        mostrarMensaje('Debes seleccionar un local de la lista desplegable.', 'error');
+        return;
+    }
+
+    const filas = document.querySelectorAll('#cuerpoTabla tr');
+    const productosAEnviar = [];
+
+    filas.forEach(fila => {
+        const nombre = fila.querySelector('.input-nombre').value;
+        const precio = Number(fila.querySelector('.input-precio').value);
+        const stock = Number(fila.querySelector('.input-stock').value);
+
+        if (nombre.trim() !== '') {
+            productosAEnviar.push({ nombre, precio, stock });
+        }
+    });
+
+    if (productosAEnviar.length === 0) {
+        mostrarMensaje('No hay productos en la tabla para guardar.', 'error');
+        return;
+    }
+
+    try {
+        const respuesta = await fetch('/api/productos/guardar-menu', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                localId,
+                productos: productosAEnviar,
+                estado: estado // 'borrador' o 'publicado'
+            })
+        });
+
+        const data = await respuesta.json();
+
+        if (respuesta.ok) {
+            mostrarMensaje(data.mensaje, 'exito');
+        } else {
+            mostrarMensaje(data.mensaje || 'Error al guardar en la base de datos.', 'error');
+        }
+    } catch (error) {
+        mostrarMensaje('Error de conexión al guardar los datos.', 'error');
+    }
+}
+
+function mostrarMensaje(texto, tipo) {
+    const div = document.getElementById('mensaje');
+    div.innerText = texto;
+    div.className = tipo;
+    div.style.display = 'block';
+}
+
+function ocultarMensaje() {
+    document.getElementById('mensaje').style.display = 'none';
+}
+
+// Inicializar la carga de locales al abrir la página web
+cargarLocales();
+</script>
+
+</body>
+</html>
