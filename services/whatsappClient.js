@@ -30,7 +30,7 @@ const client = new Client({
   authStrategy: new LocalAuth(),
   puppeteer: {
     headless: true,
-    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium',
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/nix/var/nix/profiles/default/bin/chromium',
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
