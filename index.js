@@ -9,7 +9,7 @@ const rutasAdmin = require("./routes/admin");
 const rutasAuth = require("./routes/auth");
 const { buscarBloqueHorario } = require("./helpers/horarios");
 const { extraerProductosDeImagen } = require("./services/ocrService");
-
+const MONGO_URI = process.env.MONGODB_URI || process.env.MONGO_URL;
 
 const { crearTransaccion, confirmarTransaccion } = require("./services/webpay");    
 
@@ -151,7 +151,7 @@ async function crearPedidoDesdeCarrito(carrito) {
 }
 
 // Conexión a MongoDB
-mongoose.connect(process.env.MONGODB_URI)
+mongoose.connect(MONGO_URI)
     .then(() => {
         console.log("MongoDB conectado correctamente");
         app.listen(PORT, () => {
