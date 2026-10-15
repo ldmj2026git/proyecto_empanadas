@@ -1,6 +1,5 @@
 [phases.setup]
 nixPkgs = [
-  "...",
   "chromium",
   "glib",
   "nss",
@@ -12,13 +11,6 @@ nixPkgs = [
   "gtk3",
   "pango",
   "cairo",
-  "xorg.libX11",
-  "xorg.libXcomposite",
-  "xorg.libXdamage",
-  "xorg.libXext",
-  "xorg.libXfixes",
-  "xorg.libXrandr",
-  "mesa",
   "alsa-lib"
 ]
 
