@@ -52,6 +52,21 @@ app.use("/api/admin", rutasAdmin);
 app.use(express.static("public"));
 const PORT = process.env.PORT || 3000;
 
+if (!MONGO_URI) {
+    console.error("❌ ERROR CRÍTICO: No se ha configurado MONGODB_URI ni MONGO_URL en las Variables de Railway.");
+} else {
+    mongoose.connect(MONGO_URI)
+        .then(() => {
+            console.log("✅ MongoDB conectado correctamente");
+            app.listen(PORT, () => {
+                console.log(`🚀 Servidor ejecutándose en el puerto ${PORT}`);
+            });
+        })
+        .catch((error) => {
+            console.error("❌ Error al conectar con MongoDB:", error.message);
+        });
+}
+
 async function generarNumeroPedido() {
     const ultimoPedido = await Pedido.findOne().sort({ numeroPedido: -1 });
 

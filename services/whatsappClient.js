@@ -1,6 +1,6 @@
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
-const { execSync } = require('child_process');
+const fs = require('fs');
 const {
   detectarIntencion,
   detectarProductos,
@@ -26,16 +26,17 @@ try {
   // Manejo preventivo si la ruta del modelo cambia
 }
 
-// Función para obtener la ruta exacta de Chromium en cualquier entorno Linux
 function obtenerRutaChromium() {
-  if (process.env.PUPPETEER_EXECUTABLE_PATH) {
+  if (process.env.PUPPETEER_EXECUTABLE_PATH && fs.existsSync(process.env.PUPPETEER_EXECUTABLE_PATH)) {
     return process.env.PUPPETEER_EXECUTABLE_PATH;
   }
-  try {
-    return execSync('which chromium').toString().trim();
-  } catch (error) {
+  if (fs.existsSync('/usr/bin/chromium')) {
     return '/usr/bin/chromium';
   }
+  if (fs.existsSync('/usr/bin/chromium-browser')) {
+    return '/usr/bin/chromium-browser';
+  }
+  return undefined;
 }
 
 const client = new Client({
