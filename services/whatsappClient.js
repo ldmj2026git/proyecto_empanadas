@@ -1,5 +1,4 @@
 const { Client, LocalAuth } = require('whatsapp-web.js');
-const qrcode = require('qrcode-terminal');
 const fs = require('fs');
 const {
   detectarIntencion,
@@ -108,7 +107,6 @@ client.on('message_create', async (msg) => {
         try {
           let pedido;
           if (Pedido) {
-            const numeroOrdenUnico = Date.now(); // Genera un número único basado en la fecha y hora actual
             pedido = new Pedido({
               cliente: carrito.cliente,
               localId: carrito.localId,
@@ -127,7 +125,6 @@ client.on('message_create', async (msg) => {
           const sessionId = (pedido?._id || carrito._id).toString();
           const amount = carrito.total;
           
-          // Ajusta esta URL con tu IP pública, Ngrok o dominio si pruebas desde fuera de localhost
           const returnUrl = process.env.WEBPAY_RETURN_URL || `http://localhost:3000/api/pagos/webpay/retorno`;
 
           const respuestaWebpay = await crearTransaccion(buyOrder, sessionId, amount, returnUrl);
