@@ -40,6 +40,10 @@ function obtenerRutaChromium() {
 
 const client = new Client({
   authStrategy: new LocalAuth(),
+  webVersionCache: {
+    type: 'remote',
+    remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html',
+  },
   puppeteer: {
     headless: true,
     executablePath: obtenerRutaChromium(),
@@ -50,7 +54,8 @@ const client = new Client({
       '--disable-accelerated-2d-canvas',
       '--no-first-run',
       '--no-zygote',
-      '--disable-gpu'
+      '--disable-gpu',
+      '--unhandled-rejections=strict'
     ]
   }
 });
