@@ -57,12 +57,11 @@ const client = new Client({
 });
 
 client.on('qr', (qr) => {
-  // Limpieza forzada de pantalla mediante código de escape ANSI (compatible con VS Code y PowerShell)
-  process.stdout.write('\x1Bc');
+  const urlQR = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(qr)}`;
   console.log('══════════════════════════════════════════════════');
-  console.log('⚡ ESCANEA ESTE CÓDIGO QR CON TU WHATSAPP:');
+  console.log('⚡ ESCANEA TU CÓDIGO QR ABRIENDO ESTE ENLACE EN TU NAVEGADOR:');
+  console.log(urlQR);
   console.log('══════════════════════════════════════════════════');
-  qrcode.generate(qr, { small: true });
 });
 
 client.on('ready', () => {

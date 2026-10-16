@@ -2,12 +2,15 @@ const cron = require("node-cron");
 const Pedido = require("../models/Pedido"); // Ajusta la ruta a tu modelo Pedido
 const Producto = require("../models/Producto"); // Ajusta la ruta a tu modelo Producto
 const { buscarBloqueHorario } = require("../helpers/horarios"); // Ajusta según la ubicación de tu helper de horarios
-
+const mongoose = require("mongoose");
 /**
  * Tarea programada: Se ejecuta cada 5 minutos.
  * Busca pedidos en estado "pendiente_pago" o "pendiente" con más de 15 minutos de antigüedad.
  */
 cron.schedule("*/5 * * * *", async () => {
+    if (mongoose.connection.readyState !== 1) {
+        return;
+    }
     try {
         const tiempoLímite = new Date(Date.now() - 15 * 60 * 1000); // 15 minutos atrás
 
