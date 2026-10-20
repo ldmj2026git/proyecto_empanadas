@@ -10,6 +10,7 @@ const rutasAuth = require("./routes/auth");
 const { buscarBloqueHorario } = require("./helpers/horarios");
 const { extraerProductosDeImagen } = require("./services/ocrService");
 const MONGO_URI = process.env.MONGODB_URI || process.env.MONGO_URL;
+const admin = require("firebase-admin");
 
 const { crearTransaccion, confirmarTransaccion } = require("./services/webpay");    
 
@@ -51,6 +52,19 @@ app.use("/api/auth", rutasAuth);
 app.use("/api/admin", rutasAdmin);
 app.use(express.static("public"));
 const PORT = process.env.PORT || 3000;
+
+// Inicializar Firebase Admin SDK con la variable de entorno
+if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+  try {
+    const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount)
+    });
+    console.log("✅ Firebase Admin SDK inicializado correctamente.");
+  } catch (err) {
+    console.error("❌ Error al procesar FIREBASE_SERVICE_ACCOUNT:", err.message);
+  }
+}
 
 if (!MONGO_URI) {
     console.error("❌ ERROR CRÍTICO: No se ha configurado MONGODB_URI ni MONGO_URL en las Variables de Railway.");
@@ -706,6 +720,31 @@ app.post("/api/carritos/:id/confirmar", async (req, res) => {
             error: error.message
         });
     }
+});
+
+// Endpoint HTTP para enviar notificaciones push desde Postman o tu backend
+app.post("/api/notificaciones/enviar", async (req, res) => {
+  try {
+    const { token, titulo, mensaje } = req.body;
+
+    if (!token || !titulo || !mensaje) {
+      return res.status(400).json({ ok: false, error: "Faltan datos obligatorios: token, titulo o mensaje." });
+    }
+
+    const payload = {
+      token: token,
+      notification: {
+        title: titulo,
+        body: mensaje
+      }
+    };
+
+    const response = await admin.messaging().send(payload);
+    res.json({ ok: true, mensaje: "Notificación enviada con éxito", messageId: response });
+  } catch (error) {
+    console.error("Error al enviar notificación con FCM:", error);
+    res.status(500).json({ ok: false, error: error.message });
+  }
 });
 
 app.get("/api/carritos/telefono/:telefono", async (req, res) => {
