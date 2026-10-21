@@ -58,6 +58,10 @@ const PORT = process.env.PORT || 3000;
 const rawMongoUri = process.env.MONGODB_URI || process.env.MONGO_URL || "";
 const MONGO_URI = rawMongoUri.trim().replace(/^["']|["']$/g, '');
 
+// 1. Importación compatible con CJS y ESM interop
+const firebaseAdmin = require("firebase-admin");
+const admin = firebaseAdmin.default || firebaseAdmin;
+
 // 2. Inicializar Firebase Admin SDK (Soporta JSON plano o Base64)
 const firebaseEnv = process.env.FIREBASE_SERVICE_ACCOUNT_BASE64 || process.env.FIREBASE_SERVICE_ACCOUNT;
 
@@ -79,9 +83,15 @@ if (!firebaseEnv) {
       serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
     }
 
+    // Obtención segura de la función cert
+    const certFn = (admin.credential && admin.credential.cert) 
+      ? admin.credential.cert 
+      : require("firebase-admin/app").cert;
+
     admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount)
+      credential: certFn(serviceAccount)
     });
+    
     console.log("✅ Firebase Admin SDK inicializado correctamente.");
   } catch (err) {
     console.error("❌ Error al procesar la credencial de Firebase:", err.message);
