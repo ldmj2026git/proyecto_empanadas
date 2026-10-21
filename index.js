@@ -62,7 +62,7 @@ const MONGO_URI = rawMongoUri.trim().replace(/^["']|["']$/g, '');
 const firebaseAdmin = require("firebase-admin");
 const admin = firebaseAdmin.default || firebaseAdmin;
 
-// 2. Inicializar Firebase Admin SDK (Soporta JSON plano o Base64 con sanitización)
+// 2. Inicializar Firebase Admin SDK (Soporta JSON plano o Base64 con sanitización estricta)
 const firebaseEnv = process.env.FIREBASE_SERVICE_ACCOUNT_BASE64 || process.env.FIREBASE_SERVICE_ACCOUNT;
 
 if (!firebaseEnv) {
@@ -72,14 +72,17 @@ if (!firebaseEnv) {
     let serviceAccount;
     let jsonTexto = firebaseEnv.trim();
 
-    // Si está en Base64, decodificar primero
+    // Si está en Base64, decodificar a texto
     if (!jsonTexto.startsWith("{")) {
       jsonTexto = Buffer.from(jsonTexto, 'base64').toString('utf-8');
     }
 
-    // Sanitizar saltos de línea literales no escapados dentro de las comillas del JSON
-    jsonTexto = jsonTexto.replace(/("private_key"\s*:\s*")([^"]+)(")/g, (match, p1, p2, p3) => {
-      return p1 + p2.replace(/\r/g, '').replace(/\n/g, '\\n') + p3;
+    // Convertir cualquier carácter de control sin escapar (\n, \r, \t) a secuencias válidas de JSON
+    jsonTexto = jsonTexto.replace(/[\x00-\x1F\x7F]/g, (char) => {
+      if (char === '\n') return '\\n';
+      if (char === '\r') return '\\r';
+      if (char === '\t') return '\\t';
+      return '';
     });
 
     serviceAccount = JSON.parse(jsonTexto);
