@@ -1,20 +1,20 @@
 require("dotenv").config();
-require("./jobs/limpiezaPedidos"); 
-require("./services/whatsappClient.js");
 const express = require("express");
 const mongoose = require("mongoose");
+const admin = require("firebase-admin");
+
+require("./jobs/limpiezaPedidos"); 
+require("./services/whatsappClient.js");
+
 const { WebpayPlus, Options, Environment } = require("transbank-sdk");
 const { notificarPagoExitoso } = require("./services/notificaciones.js");
 const rutasAdmin = require("./routes/admin");
 const rutasAuth = require("./routes/auth");
 const { buscarBloqueHorario } = require("./helpers/horarios");
 const { extraerProductosDeImagen } = require("./services/ocrService");
-const MONGO_URI = process.env.MONGODB_URI || process.env.MONGO_URL;
-const admin = require("firebase-admin");
-
 const { crearTransaccion, confirmarTransaccion } = require("./services/webpay");    
 
-// 1. Modelos y funciones
+// Modelos y funciones
 const Producto = require("./models/Producto");
 const Pedido = require("./models/Pedido");
 const BloqueHorario = require("./models/BloqueHorario");
@@ -45,15 +45,20 @@ const app = express();
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(express.static("public"));
+
 app.use("/api", empresasRouter);
 app.use("/api/pagos", pagosRouter);
 app.use("/api/admin", rutasAdmin);
 app.use("/api/auth", rutasAuth);
-app.use("/api/admin", rutasAdmin);
-app.use(express.static("public"));
+
 const PORT = process.env.PORT || 3000;
 
-// Inicialización de Firebase con logs de diagnóstico
+// 1. Sanitizar la cadena de conexión de MongoDB
+const rawMongoUri = process.env.MONGODB_URI || process.env.MONGO_URL || "";
+const MONGO_URI = rawMongoUri.trim().replace(/^["']|["']$/g, '');
+
+// 2. Inicializar Firebase Admin SDK
 const firebaseConfigRaw = process.env.FIREBASE_SERVICE_ACCOUNT;
 
 if (!firebaseConfigRaw) {
@@ -70,6 +75,7 @@ if (!firebaseConfigRaw) {
   }
 }
 
+// 3. Conexión única a MongoDB y arranque del servidor
 if (!MONGO_URI) {
     console.error("❌ ERROR CRÍTICO: No se ha configurado MONGODB_URI ni MONGO_URL en las Variables de Railway.");
 } else {
@@ -87,17 +93,12 @@ if (!MONGO_URI) {
 
 async function generarNumeroPedido() {
     const ultimoPedido = await Pedido.findOne().sort({ numeroPedido: -1 });
-
-    if (!ultimoPedido) {
-        return 1001;
-    }
-
+    if (!ultimoPedido) return 1001;
     return ultimoPedido.numeroPedido + 1;
 }
 
-
 // ================================================================
-// OBTENER LISTA DE LOCALES (Para el selector desplegable)
+// OBTENER LISTA DE LOCALES
 // ================================================================
 app.get("/api/locales", async (req, res) => {
     try {
@@ -183,18 +184,6 @@ async function crearPedidoDesdeCarrito(carrito) {
     return { ok: true, pedido: nuevoPedido, horario: horario };
 }
 
-// Conexión a MongoDB
-mongoose.connect(MONGO_URI)
-    .then(() => {
-        console.log("MongoDB conectado correctamente");
-        app.listen(PORT, () => {
-            console.log(`Servidor ejecutándose en http://localhost:${PORT}`);
-        });
-    })
-    .catch((error) => {
-        console.error("Error al conectar con MongoDB:", error);
-    });
-
 // Ruta de prueba
 app.get("/", (req, res) => {
     res.json({ mensaje: "API de empanadas funcionando", estado: "OK" });
@@ -231,7 +220,7 @@ app.get("/api/productos", async (req, res) => {
 });
 
 // ================================================================
-// OCR: ESCANEAR IMAGEN DE MENÚ (Devuelve el borrador JSON)
+// OCR: ESCANEAR IMAGEN DE MENÚ
 // ================================================================
 app.post("/api/productos/escanear-menu", async (req, res) => {
     try {
@@ -254,11 +243,11 @@ app.post("/api/productos/escanear-menu", async (req, res) => {
 });
 
 // ================================================================
-// OCR: GUARDAR (BORRADOR O PUBLICADO) EN MONGO DB
+// OCR: GUARDAR EN MONGO DB
 // ================================================================
 app.post("/api/productos/guardar-menu", async (req, res) => {
     try {
-        const { localId, productos, estado } = req.body; // estado: 'borrador' | 'publicado'
+        const { localId, productos, estado } = req.body;
 
         if (!localId) {
             return res.status(400).json({ mensaje: "El parámetro localId es obligatorio." });
@@ -279,7 +268,7 @@ app.post("/api/productos/guardar-menu", async (req, res) => {
                     nombre: prod.nombre.trim(),
                     precio: prod.precio,
                     stock: prod.stock !== undefined ? prod.stock : 10,
-                    activo: !esBorrador // Si es borrador queda inactivo temporalmente hasta confirmar
+                    activo: !esBorrador
                 },
                 { upsert: true, new: true, setDefaultsOnInsert: true }
             );
@@ -307,7 +296,6 @@ app.post("/api/carritos", async (req, res) => {
     try {
         const { localId, nombre, telefono } = req.body;
 
-        // Desactivar carritos previos del mismo teléfono en el mismo local
         await Carrito.updateMany(
             { telefono, localId, estado: "activo" },
             { $set: { estado: "abandonado" } }
@@ -329,20 +317,10 @@ app.post("/api/carritos", async (req, res) => {
 app.get("/api/carritos/:id", async (req, res) => {
     try {
         const carrito = await Carrito.findById(req.params.id);
-
-        if (!carrito) {
-            return res.status(404).json({
-                mensaje: "Carrito no encontrado"
-            });
-        }
-
+        if (!carrito) return res.status(404).json({ mensaje: "Carrito no encontrado" });
         res.json(carrito);
-
     } catch (error) {
-        res.status(500).json({
-            mensaje: "Error al buscar el carrito",
-            error: error.message
-        });
+        res.status(500).json({ mensaje: "Error al buscar el carrito", error: error.message });
     }
 });
 
@@ -351,37 +329,17 @@ app.post("/api/carritos/:id/productos", async (req, res) => {
         const { productoId, cantidad } = req.body;
 
         if (!Number.isInteger(cantidad) || cantidad < 1) {
-            return res.status(400).json({
-                mensaje: "La cantidad debe ser un número entero mayor que 0"
-            });
+            return res.status(400).json({ mensaje: "La cantidad debe ser un número entero mayor que 0" });
         }
 
         const carrito = await Carrito.findById(req.params.id);
-
-        if (!carrito) {
-            return res.status(404).json({
-                mensaje: "Carrito no encontrado"
-            });
-        }
+        if (!carrito) return res.status(404).json({ mensaje: "Carrito no encontrado" });
 
         const producto = await Producto.findById(productoId);
+        if (!producto) return res.status(404).json({ mensaje: "Producto no encontrado" });
+        if (!producto.activo) return res.status(400).json({ mensaje: `El producto ${producto.nombre} no está disponible` });
 
-        if (!producto) {
-            return res.status(404).json({
-                mensaje: "Producto no encontrado"
-            });
-        }
-
-        if (!producto.activo) {
-            return res.status(400).json({
-                mensaje: `El producto ${producto.nombre} no está disponible`
-            });
-        }
-
-        const productoExistente = carrito.productos.find(
-            item => item.productoId.toString() === producto._id.toString()
-        );
-
+        const productoExistente = carrito.productos.find(item => item.productoId.toString() === producto._id.toString());
         const cantidadActual = productoExistente ? productoExistente.cantidad : 0;
         const cantidadFinal = cantidadActual + cantidad;
 
@@ -412,28 +370,16 @@ app.post("/api/carritos/:id/productos", async (req, res) => {
         }
 
         await carrito.save();
-
-        res.json({
-            mensaje: "Producto agregado al carrito",
-            carrito: carrito
-        });
+        res.json({ mensaje: "Producto agregado al carrito", carrito: carrito });
     } catch (error) {
-        res.status(500).json({
-            mensaje: "Error al buscar carrito o producto",
-            error: error.message
-        });
+        res.status(500).json({ mensaje: "Error al buscar carrito o producto", error: error.message });
     }
 });
 
 app.put("/api/carritos/:id/recalcular", async (req, res) => {
     try {
         const carrito = await Carrito.findById(req.params.id);
-
-        if (!carrito) {
-            return res.status(404).json({
-                mensaje: "Carrito no encontrado"
-            });
-        }
+        if (!carrito) return res.status(404).json({ mensaje: "Carrito no encontrado" });
 
         carrito.total = 0;
         for (const item of carrito.productos) {
@@ -441,97 +387,48 @@ app.put("/api/carritos/:id/recalcular", async (req, res) => {
         }
 
         await carrito.save();
-
-        res.json({
-            mensaje: "Carrito recalculado correctamente",
-            carrito: carrito
-        });
-
+        res.json({ mensaje: "Carrito recalculado correctamente", carrito: carrito });
     } catch (error) {
-        res.status(500).json({
-            mensaje: "Error al recalcular el carrito",
-            error: error.message
-        });
+        res.status(500).json({ mensaje: "Error al recalcular el carrito", error: error.message });
     }
 });
 
 app.delete("/api/carritos/:id/productos/:productoId", async (req, res) => {
     try {
         const carrito = await Carrito.findById(req.params.id);
+        if (!carrito) return res.status(404).json({ mensaje: "Carrito no encontrado" });
 
-        if (!carrito) {
-            return res.status(404).json({
-                mensaje: "Carrito no encontrado"
-            });
-        }
-
-        const productoIndex = carrito.productos.findIndex(
-            item => item.productoId.toString() === req.params.productoId
-        );
-
-        if (productoIndex === -1) {
-            return res.status(404).json({
-                mensaje: "El producto no está en el carrito"
-            });
-        }
+        const productoIndex = carrito.productos.findIndex(item => item.productoId.toString() === req.params.productoId);
+        if (productoIndex === -1) return res.status(404).json({ mensaje: "El producto no está en el carrito" });
 
         carrito.productos.splice(productoIndex, 1);
-
         carrito.total = 0;
         for (const item of carrito.productos) {
             carrito.total += item.precioUnitario * item.cantidad;
         }
 
         await carrito.save();
-
-        res.json({
-            mensaje: "Producto eliminado del carrito",
-            carrito: carrito
-        });
-
+        res.json({ mensaje: "Producto eliminado del carrito", carrito: carrito });
     } catch (error) {
-        res.status(500).json({
-            mensaje: "Error al eliminar el producto del carrito",
-            error: error.message
-        });
+        res.status(500).json({ mensaje: "Error al eliminar el producto del carrito", error: error.message });
     }
 });
 
 app.put("/api/carritos/:id/productos/:productoId", async (req, res) => {
     try {
         const { cantidad } = req.body;
-
         if (!Number.isInteger(cantidad) || cantidad < 1) {
-            return res.status(400).json({
-                mensaje: "La cantidad debe ser un número entero mayor que 0"
-            });
+            return res.status(400).json({ mensaje: "La cantidad debe ser un número entero mayor que 0" });
         }
 
         const carrito = await Carrito.findById(req.params.id);
+        if (!carrito) return res.status(404).json({ mensaje: "Carrito no encontrado" });
 
-        if (!carrito) {
-            return res.status(404).json({
-                mensaje: "Carrito no encontrado"
-            });
-        }
-
-        const producto = carrito.productos.find(
-            item => item.productoId.toString() === req.params.productoId
-        );
-
-        if (!producto) {
-            return res.status(404).json({
-                mensaje: "El producto no está en el carrito"
-            });
-        }
+        const producto = carrito.productos.find(item => item.productoId.toString() === req.params.productoId);
+        if (!producto) return res.status(404).json({ mensaje: "El producto no está en el carrito" });
 
         const productoBD = await Producto.findById(req.params.productoId);
-
-        if (!productoBD) {
-            return res.status(404).json({
-                mensaje: "Producto no encontrado"
-            });
-        }
+        if (!productoBD) return res.status(404).json({ mensaje: "Producto no encontrado" });
 
         if (cantidad > productoBD.stock) {
             return res.status(400).json({
@@ -541,90 +438,49 @@ app.put("/api/carritos/:id/productos/:productoId", async (req, res) => {
         }
 
         producto.cantidad = cantidad;
-
         carrito.total = 0;
         for (const item of carrito.productos) {
             carrito.total += item.precioUnitario * item.cantidad;
         }
 
         await carrito.save();
-
-        res.json({
-            mensaje: "Cantidad actualizada correctamente",
-            carrito: carrito
-        });
-
+        res.json({ mensaje: "Cantidad actualizada correctamente", carrito: carrito });
     } catch (error) {
-        res.status(500).json({
-            mensaje: "Error al actualizar la cantidad",
-            error: error.message
-        });
+        res.status(500).json({ mensaje: "Error al actualizar la cantidad", error: error.message });
     }
 });
 
 app.put("/api/carritos/:id/entrega", async (req, res) => {
     try {
         const { tipoEntrega } = req.body;
-
         if (!["retiro", "delivery"].includes(tipoEntrega)) {
-            return res.status(400).json({
-                mensaje: "El tipo de entrega debe ser retiro o delivery"
-            });
+            return res.status(400).json({ mensaje: "El tipo de entrega debe ser retiro o delivery" });
         }
 
         const carrito = await Carrito.findById(req.params.id);
-
-        if (!carrito) {
-            return res.status(404).json({
-                mensaje: "Carrito no encontrado"
-            });
-        }
+        if (!carrito) return res.status(404).json({ mensaje: "Carrito no encontrado" });
 
         carrito.tipoEntrega = tipoEntrega;
-
         await carrito.save();
-
-        res.json({
-            mensaje: "Tipo de entrega actualizado correctamente",
-            carrito: carrito
-        });
-
+        res.json({ mensaje: "Tipo de entrega actualizado correctamente", carrito: carrito });
     } catch (error) {
-        res.status(500).json({
-            mensaje: "Error al actualizar el tipo de entrega",
-            error: error.message
-        });
+        res.status(500).json({ mensaje: "Error al actualizar el tipo de entrega", error: error.message });
     }
 });
 
 app.put("/api/carritos/:id/horario", async (req, res) => {
     try {
         const { fechaRetiro, horaRetiro } = req.body;
-
         if (!fechaRetiro || !horaRetiro) {
-            return res.status(400).json({
-                mensaje: "La fecha y hora de retiro son obligatorias"
-            });
+            return res.status(400).json({ mensaje: "La fecha y hora de retiro son obligatorias" });
         }
 
         const carrito = await Carrito.findById(req.params.id);
+        if (!carrito) return res.status(404).json({ mensaje: "Carrito no encontrado" });
 
-        if (!carrito) {
-            return res.status(404).json({
-                mensaje: "Carrito no encontrado"
-            });
-        }
-
-        const bloque = await buscarBloqueHorario(
-            fechaRetiro,
-            horaRetiro,
-            carrito.localId
-        );
-
+        const bloque = await buscarBloqueHorario(fechaRetiro, horaRetiro, carrito.localId);
         if (!bloque) {
-            return res.status(400).json({
-                mensaje: `No existe un bloque horario que incluya las ${horaRetiro}.`
-            });
+            return res.status(400).json({ mensaje: `No existe un bloque horario que incluya las ${horaRetiro}.` });
         }
 
         if (bloque.reservadas >= bloque.capacidad) {
@@ -637,7 +493,6 @@ app.put("/api/carritos/:id/horario", async (req, res) => {
 
         carrito.fechaRetiro = new Date(fechaRetiro);
         carrito.horaRetiro = horaRetiro;
-
         await carrito.save();
 
         res.json({
@@ -651,82 +506,45 @@ app.put("/api/carritos/:id/horario", async (req, res) => {
                 cuposDisponibles: bloque.capacidad - bloque.reservadas
             }
         });
-
     } catch (error) {
-        res.status(500).json({
-            mensaje: "Error al actualizar el horario",
-            error: error.message
-        });
+        res.status(500).json({ mensaje: "Error al actualizar el horario", error: error.message });
     }
 });
 
 app.put("/api/carritos/:id/pago", async (req, res) => {
     try {
         const { metodoPago } = req.body;
-
         if (!["efectivo", "transferencia", "tarjeta"].includes(metodoPago)) {
-            return res.status(400).json({
-                mensaje: "El método de pago debe ser efectivo, transferencia o tarjeta"
-            });
+            return res.status(400).json({ mensaje: "El método de pago debe ser efectivo, transferencia o tarjeta" });
         }
 
         const carrito = await Carrito.findById(req.params.id);
-
-        if (!carrito) {
-            return res.status(404).json({
-                mensaje: "Carrito no encontrado"
-            });
-        }
+        if (!carrito) return res.status(404).json({ mensaje: "Carrito no encontrado" });
 
         carrito.metodoPago = metodoPago;
-
         await carrito.save();
-
-        res.json({
-            mensaje: "Método de pago actualizado correctamente",
-            carrito: carrito
-        });
-
+        res.json({ mensaje: "Método de pago actualizado correctamente", carrito: carrito });
     } catch (error) {
-        res.status(500).json({
-            mensaje: "Error al actualizar el método de pago",
-            error: error.message
-        });
+        res.status(500).json({ mensaje: "Error al actualizar el método de pago", error: error.message });
     }
 });
 
 app.post("/api/carritos/:id/confirmar", async (req, res) => {
     try {
         const carrito = await Carrito.findById(req.params.id);
-
-        if (!carrito) {
-            return res.status(404).json({ mensaje: "Carrito no encontrado" });
-        }
-
-        if (carrito.estado !== "activo") {
-            return res.status(400).json({ mensaje: "El carrito ya fue procesado" });
-        }
+        if (!carrito) return res.status(404).json({ mensaje: "Carrito no encontrado" });
+        if (carrito.estado !== "activo") return res.status(400).json({ mensaje: "El carrito ya fue procesado" });
 
         const resultado = await crearPedidoDesdeCarrito(carrito);
+        if (!resultado.ok) return res.status(400).json({ mensaje: resultado.mensaje });
 
-        if (!resultado.ok) {
-            return res.status(400).json({ mensaje: resultado.mensaje });
-        }
-
-        res.status(201).json({
-            mensaje: "Pedido creado correctamente",
-            pedido: resultado.pedido
-        });
-
+        res.status(201).json({ mensaje: "Pedido creado correctamente", pedido: resultado.pedido });
     } catch (error) {
-        res.status(500).json({
-            mensaje: "Error al confirmar el carrito",
-            error: error.message
-        });
+        res.status(500).json({ mensaje: "Error al confirmar el carrito", error: error.message });
     }
 });
 
-// Endpoint HTTP para enviar notificaciones push desde Postman o tu backend
+// Endpoint HTTP para enviar notificaciones push desde Postman
 app.post("/api/notificaciones/enviar", async (req, res) => {
   try {
     const { token, titulo, mensaje } = req.body;
@@ -753,34 +571,17 @@ app.post("/api/notificaciones/enviar", async (req, res) => {
 
 app.get("/api/carritos/telefono/:telefono", async (req, res) => {
     try {
-        const carrito = await Carrito.findOne({
-            "cliente.telefono": req.params.telefono,
-            estado: "activo"
-        });
-
-        if (!carrito) {
-            return res.status(404).json({
-                mensaje: "No existe un carrito activo para este teléfono"
-            });
-        }
-
+        const carrito = await Carrito.findOne({ "cliente.telefono": req.params.telefono, estado: "activo" });
+        if (!carrito) return res.status(404).json({ mensaje: "No existe un carrito activo para este teléfono" });
         res.json(carrito);
-
     } catch (error) {
-        res.status(500).json({
-            mensaje: "Error al buscar el carrito por teléfono",
-            error: error.message
-        });
+        res.status(500).json({ mensaje: "Error al buscar el carrito por teléfono", error: error.message });
     }
 });
 
 app.get("/api/catalogo", async (req, res) => {
     try {
-        const productos = await Producto.find({
-            activo: true,
-            stock: { $gt: 0 }
-        });
-
+        const productos = await Producto.find({ activo: true, stock: { $gt: 0 } });
         const catalogo = productos.map(producto => ({
             id: producto._id,
             nombre: producto.nombre,
@@ -788,14 +589,9 @@ app.get("/api/catalogo", async (req, res) => {
             precio: producto.precio,
             stockDisponible: producto.stock
         }));
-
         res.json(catalogo);
-
     } catch (error) {
-        res.status(500).json({
-            mensaje: "Error al obtener el catálogo",
-            error: error.message
-        });
+        res.status(500).json({ mensaje: "Error al obtener el catálogo", error: error.message });
     }
 });
 
@@ -804,86 +600,41 @@ app.put("/api/productos/:id", async (req, res) => {
         const productoActualizado = await Producto.findByIdAndUpdate(
             req.params.id,
             req.body,
-            {
-                returnDocument: "after",
-                runValidators: true
-            }
+            { returnDocument: "after", runValidators: true }
         );
-
-        if (!productoActualizado) {
-            return res.status(404).json({
-                mensaje: "Producto no encontrado"
-            });
-        }
-
+        if (!productoActualizado) return res.status(404).json({ mensaje: "Producto no encontrado" });
         res.json(productoActualizado);
-
     } catch (error) {
-        res.status(500).json({
-            mensaje: "Error al actualizar el producto",
-            error: error.message
-        });
+        res.status(500).json({ mensaje: "Error al actualizar el producto", error: error.message });
     }
 });
 
 app.delete("/api/productos/:id", async (req, res) => {
     try {
-        const productoEliminado = await Producto.findByIdAndDelete(
-            req.params.id
-        );
-
-        if (!productoEliminado) {
-            return res.status(404).json({
-                mensaje: "Producto no encontrado"
-            });
-        }
-
-        res.json({
-            mensaje: "Producto eliminado correctamente",
-            producto: productoEliminado
-        });
-
+        const productoEliminado = await Producto.findByIdAndDelete(req.params.id);
+        if (!productoEliminado) return res.status(404).json({ mensaje: "Producto no encontrado" });
+        res.json({ mensaje: "Producto eliminado correctamente", producto: productoEliminado });
     } catch (error) {
-        res.status(500).json({
-            mensaje: "Error al eliminar el producto",
-            error: error.message
-        });
+        res.status(500).json({ mensaje: "Error al eliminar el producto", error: error.message });
     }
 });
 
 app.post("/api/pedidos/cotizar", async (req, res) => {
     try {
         const { productos } = req.body;
-
         let total = 0;
         const productosCotizados = [];
 
         for (const item of productos) {
             if (!Number.isInteger(item.cantidad) || item.cantidad < 1) {
-                return res.status(400).json({
-                    mensaje: "La cantidad debe ser un número entero mayor que 0"
-                });
+                return res.status(400).json({ mensaje: "La cantidad debe ser un número entero mayor que 0" });
             }
 
             const producto = await Producto.findById(item.productoId);
-
-            if (!producto) {
-                return res.status(404).json({
-                    mensaje: `Producto no encontrado: ${item.productoId}`
-                });
-            }
-
-            if (!producto.activo) {
-                return res.status(400).json({
-                    mensaje: `El producto ${producto.nombre} no está disponible`
-                });
-            }
-
+            if (!producto) return res.status(404).json({ mensaje: `Producto no encontrado: ${item.productoId}` });
+            if (!producto.activo) return res.status(400).json({ mensaje: `El producto ${producto.nombre} no está disponible` });
             if (item.cantidad > producto.stock) {
-                return res.status(400).json({
-                    mensaje: `No hay suficiente stock de ${producto.nombre}`,
-                    stockDisponible: producto.stock
-                });
+                return res.status(400).json({ mensaje: `No hay suficiente stock de ${producto.nombre}`, stockDisponible: producto.stock });
             }
 
             const subtotal = producto.precio * item.cantidad;
@@ -898,38 +649,19 @@ app.post("/api/pedidos/cotizar", async (req, res) => {
             });
         }
 
-        res.json({
-            productos: productosCotizados,
-            total: total
-        });
-
+        res.json({ productos: productosCotizados, total: total });
     } catch (error) {
-        res.status(500).json({
-            mensaje: "Error al cotizar el pedido",
-            error: error.message
-        });
+        res.status(500).json({ mensaje: "Error al cotizar el pedido", error: error.message });
     }
 });
 
 app.post("/api/pedidos", async (req, res) => {
     try {
         const { localId, numeroPedido, cliente, productos, tipoEntrega, metodoPago, fechaRetiro, horaRetiro } = req.body;
+        if (!localId) return res.status(400).json({ mensaje: "El parámetro localId es obligatorio" });
 
-        if (!localId) {
-            return res.status(400).json({ mensaje: "El parámetro localId es obligatorio" });
-        }
-
-        const bloque = await buscarBloqueHorario(
-            fechaRetiro,
-            horaRetiro,
-            localId
-        );
-
-        if (!bloque) {
-            return res.status(400).json({
-                mensaje: `No existe un bloque horario que incluya las ${horaRetiro}.`
-            });
-        }
+        const bloque = await buscarBloqueHorario(fechaRetiro, horaRetiro, localId);
+        if (!bloque) return res.status(400).json({ mensaje: `No existe un bloque horario que incluya las ${horaRetiro}.` });
 
         if (bloque.reservadas >= bloque.capacidad) {
             return res.status(400).json({
@@ -944,30 +676,14 @@ app.post("/api/pedidos", async (req, res) => {
 
         for (const item of productos) {
             if (!Number.isInteger(item.cantidad) || item.cantidad < 1) {
-                return res.status(400).json({
-                    mensaje: "La cantidad debe ser un número entero mayor que 0"
-                });
+                return res.status(400).json({ mensaje: "La cantidad debe ser un número entero mayor que 0" });
             }
 
             const producto = await Producto.findById(item.productoId);
-
-            if (!producto) {
-                return res.status(404).json({
-                    mensaje: `Producto no encontrado: ${item.productoId}`
-                });
-            }
-
-            if (!producto.activo) {
-                return res.status(400).json({
-                    mensaje: `El producto ${producto.nombre} no está disponible`
-                });
-            }
-
+            if (!producto) return res.status(404).json({ mensaje: `Producto no encontrado: ${item.productoId}` });
+            if (!producto.activo) return res.status(400).json({ mensaje: `El producto ${producto.nombre} no está disponible` });
             if (item.cantidad > producto.stock) {
-                return res.status(400).json({
-                    mensaje: `No hay suficiente stock de ${producto.nombre}`,
-                    stockDisponible: producto.stock
-                });
+                return res.status(400).json({ mensaje: `No hay suficiente stock de ${producto.nombre}`, stockDisponible: producto.stock });
             }
 
             producto.stock -= item.cantidad;
@@ -997,17 +713,12 @@ app.post("/api/pedidos", async (req, res) => {
         });
 
         const pedidoGuardado = await pedido.save();
-
         bloque.reservadas += 1;
         await bloque.save();
 
         res.status(201).json(pedidoGuardado);
-
     } catch (error) {
-        res.status(500).json({
-            mensaje: "Error al crear el pedido",
-            error: error.message
-        });
+        res.status(500).json({ mensaje: "Error al crear el pedido", error: error.message });
     }
 });
 
@@ -1016,97 +727,52 @@ app.get("/api/pedidos", async (req, res) => {
         const pedidos = await Pedido.find();
         res.json(pedidos);
     } catch (error) {
-        res.status(500).json({
-            mensaje: "Error al obtener los pedidos",
-            error: error.message
-        });
+        res.status(500).json({ mensaje: "Error al obtener los pedidos", error: error.message });
     }
 });
 
 app.get("/api/pedidos/:id", async (req, res) => {
     try {
         const pedido = await Pedido.findById(req.params.id);
-
-        if (!pedido) {
-            return res.status(404).json({
-                mensaje: "Pedido no encontrado"
-            });
-        }
-
+        if (!pedido) return res.status(404).json({ mensaje: "Pedido no encontrado" });
         res.json(pedido);
-
     } catch (error) {
-        res.status(500).json({
-            mensaje: "Error al buscar el pedido",
-            error: error.message
-        });
+        res.status(500).json({ mensaje: "Error al buscar el pedido", error: error.message });
     }
 });
 
 app.put("/api/pedidos/:id/estado", async (req, res) => {
     try {
         const { estado } = req.body;
-
-        const estadosPermitidos = [
-            "pendiente",
-            "en_preparacion",
-            "listo",
-            "entregado",
-            "cancelado"
-        ];
+        const estadosPermitidos = ["pendiente", "en_preparacion", "listo", "entregado", "cancelado"];
 
         if (!estadosPermitidos.includes(estado)) {
-            return res.status(400).json({
-                mensaje: "Estado no válido",
-                estadosPermitidos
-            });
+            return res.status(400).json({ mensaje: "Estado no válido", estadosPermitidos });
         }
 
         const pedidoActualizado = await Pedido.findByIdAndUpdate(
             req.params.id,
             { estado: estado },
-            {
-                new: true,
-                runValidators: true
-            }
+            { new: true, runValidators: true }
         );
 
-        if (!pedidoActualizado) {
-            return res.status(404).json({
-                mensaje: "Pedido no encontrado"
-            });
-        }
-
+        if (!pedidoActualizado) return res.status(404).json({ mensaje: "Pedido no encontrado" });
         res.json(pedidoActualizado);
-
     } catch (error) {
-        res.status(500).json({
-            mensaje: "Error al actualizar el estado",
-            error: error.message
-        });
+        res.status(500).json({ mensaje: "Error al actualizar el estado", error: error.message });
     }
 });
 
 app.put("/api/pedidos/:id/cancelar", async (req, res) => {
     try {
         const pedido = await Pedido.findById(req.params.id);
+        if (!pedido) return res.status(404).json({ mensaje: "Pedido no encontrado" });
+        if (pedido.estado === "cancelado") return res.status(400).json({ mensaje: "El pedido ya se encuentra cancelado" });
 
-        if (!pedido) {
-            return res.status(404).json({ mensaje: "Pedido no encontrado" });
-        }
-
-        if (pedido.estado === "cancelado") {
-            return res.status(400).json({ mensaje: "El pedido ya se encuentra cancelado" });
-        }
-
-        // 1. Devolver el stock a cada producto
         for (const item of pedido.productos) {
-            await Producto.findByIdAndUpdate(item.productoId, {
-                $inc: { stock: item.cantidad }
-            });
+            await Producto.findByIdAndUpdate(item.productoId, { $inc: { stock: item.cantidad } });
         }
 
-        // 2. Liberar el cupo del horario
         if (pedido.fechaRetiro && pedido.horaRetiro) {
             const bloque = await buscarBloqueHorario(pedido.fechaRetiro, pedido.horaRetiro, pedido.localId);
             if (bloque && bloque.reservadas > 0) {
@@ -1115,66 +781,34 @@ app.put("/api/pedidos/:id/cancelar", async (req, res) => {
             }
         }
 
-        // 3. Marcar el pedido como cancelado
         pedido.estado = "cancelado";
         await pedido.save();
-
-        res.json({
-            mensaje: "Pedido cancelado correctamente",
-            pedido
-        });
-
+        res.json({ mensaje: "Pedido cancelado correctamente", pedido });
     } catch (error) {
         console.error("Error al cancelar el pedido:", error);
-        res.status(500).json({
-            mensaje: "Error al cancelar el pedido",
-            error: error.message
-        });
+        res.status(500).json({ mensaje: "Error al cancelar el pedido", error: error.message });
     }
 });
 
 app.put("/api/pedidos/:id/productos/:productoId", async (req, res) => {
     try {
         const { cantidad } = req.body;
-
         if (!Number.isInteger(cantidad) || cantidad < 1) {
-            return res.status(400).json({
-                mensaje: "La cantidad debe ser un número entero mayor que 0"
-            });
+            return res.status(400).json({ mensaje: "La cantidad debe ser un número entero mayor que 0" });
         }
 
         const pedido = await Pedido.findById(req.params.id);
-
-        if (!pedido) {
-            return res.status(404).json({
-                mensaje: "Pedido no encontrado"
-            });
-        }
+        if (!pedido) return res.status(404).json({ mensaje: "Pedido no encontrado" });
 
         if (pedido.estado !== "pendiente") {
-            return res.status(400).json({
-                mensaje: "El pedido no se puede modificar en su estado actual",
-                estadoActual: pedido.estado
-            });
+            return res.status(400).json({ mensaje: "El pedido no se puede modificar en su estado actual", estadoActual: pedido.estado });
         }
 
-        const productoPedido = pedido.productos.find(
-            item => item.productoId.toString() === req.params.productoId
-        );
-
-        if (!productoPedido) {
-            return res.status(404).json({
-                mensaje: "El producto no está en el pedido"
-            });
-        }
+        const productoPedido = pedido.productos.find(item => item.productoId.toString() === req.params.productoId);
+        if (!productoPedido) return res.status(404).json({ mensaje: "El producto no está en el pedido" });
 
         const producto = await Producto.findById(req.params.productoId);
-
-        if (!producto) {
-            return res.status(404).json({
-                mensaje: "Producto no encontrado"
-            });
-        }
+        if (!producto) return res.status(404).json({ mensaje: "Producto no encontrado" });
 
         const diferencia = cantidad - productoPedido.cantidad;
 
@@ -1194,7 +828,6 @@ app.put("/api/pedidos/:id/productos/:productoId", async (req, res) => {
         }
 
         productoPedido.cantidad = cantidad;
-
         pedido.total = 0;
         for (const item of pedido.productos) {
             pedido.total += item.precioUnitario * item.cantidad;
@@ -1202,69 +835,35 @@ app.put("/api/pedidos/:id/productos/:productoId", async (req, res) => {
 
         await producto.save();
         await pedido.save();
-
-        res.json({
-            mensaje: "Cantidad del producto modificada correctamente",
-            pedido: pedido
-        });
-
+        res.json({ mensaje: "Cantidad del producto modificada correctamente", pedido: pedido });
     } catch (error) {
-        res.status(500).json({
-            mensaje: "Error al modificar la cantidad del producto",
-            error: error.message
-        });
+        res.status(500).json({ mensaje: "Error al modificar la cantidad del producto", error: error.message });
     }
 });
 
 app.post("/api/pedidos/:id/productos", async (req, res) => {
     try {
         const { productoId, cantidad } = req.body;
-
         if (!Number.isInteger(cantidad) || cantidad < 1) {
-            return res.status(400).json({
-                mensaje: "La cantidad debe ser un número entero mayor que 0"
-            });
+            return res.status(400).json({ mensaje: "La cantidad debe ser un número entero mayor que 0" });
         }
 
         const pedido = await Pedido.findById(req.params.id);
-
-        if (!pedido) {
-            return res.status(404).json({
-                mensaje: "Pedido no encontrado"
-            });
-        }
+        if (!pedido) return res.status(404).json({ mensaje: "Pedido no encontrado" });
 
         if (pedido.estado !== "pendiente") {
-            return res.status(400).json({
-                mensaje: "El pedido no se puede modificar en su estado actual",
-                estadoActual: pedido.estado
-            });
+            return res.status(400).json({ mensaje: "El pedido no se puede modificar en su estado actual", estadoActual: pedido.estado });
         }
 
         const producto = await Producto.findById(productoId);
-
-        if (!producto) {
-            return res.status(404).json({
-                mensaje: "Producto no encontrado"
-            });
-        }
-
-        if (!producto.activo) {
-            return res.status(400).json({
-                mensaje: `El producto ${producto.nombre} no está disponible`
-            });
-        }
+        if (!producto) return res.status(404).json({ mensaje: "Producto no encontrado" });
+        if (!producto.activo) return res.status(400).json({ mensaje: `El producto ${producto.nombre} no está disponible` });
 
         if (cantidad > producto.stock) {
-            return res.status(400).json({
-                mensaje: `No hay suficiente stock de ${producto.nombre}`,
-                stockDisponible: producto.stock
-            });
+            return res.status(400).json({ mensaje: `No hay suficiente stock de ${producto.nombre}`, stockDisponible: producto.stock });
         }
 
-        const productoExistente = pedido.productos.find(
-            item => item.productoId.toString() === productoId
-        );
+        const productoExistente = pedido.productos.find(item => item.productoId.toString() === productoId);
 
         if (productoExistente) {
             productoExistente.cantidad += cantidad;
@@ -1278,7 +877,6 @@ app.post("/api/pedidos/:id/productos", async (req, res) => {
         }
 
         producto.stock -= cantidad;
-
         pedido.total = 0;
         for (const item of pedido.productos) {
             pedido.total += item.precioUnitario * item.cantidad;
@@ -1286,56 +884,27 @@ app.post("/api/pedidos/:id/productos", async (req, res) => {
 
         await producto.save();
         await pedido.save();
-
-        res.json({
-            mensaje: "Producto agregado al pedido correctamente",
-            pedido: pedido
-        });
-
+        res.json({ mensaje: "Producto agregado al pedido correctamente", pedido: pedido });
     } catch (error) {
-        res.status(500).json({
-            mensaje: "Error al agregar producto al pedido",
-            error: error.message
-        });
+        res.status(500).json({ mensaje: "Error al agregar producto al pedido", error: error.message });
     }
 });
 
 app.delete("/api/pedidos/:id/productos/:productoId", async (req, res) => {
     try {
         const pedido = await Pedido.findById(req.params.id);
-
-        if (!pedido) {
-            return res.status(404).json({
-                mensaje: "Pedido no encontrado"
-            });
-        }
+        if (!pedido) return res.status(404).json({ mensaje: "Pedido no encontrado" });
 
         if (pedido.estado !== "pendiente") {
-            return res.status(400).json({
-                mensaje: "El pedido no se puede modificar en su estado actual",
-                estadoActual: pedido.estado
-            });
+            return res.status(400).json({ mensaje: "El pedido no se puede modificar en su estado actual", estadoActual: pedido.estado });
         }
 
-        const productoIndex = pedido.productos.findIndex(
-            item => item.productoId.toString() === req.params.productoId
-        );
-
-        if (productoIndex === -1) {
-            return res.status(404).json({
-                mensaje: "El producto no está en el pedido"
-            });
-        }
+        const productoIndex = pedido.productos.findIndex(item => item.productoId.toString() === req.params.productoId);
+        if (productoIndex === -1) return res.status(404).json({ mensaje: "El producto no está en el pedido" });
 
         const productoPedido = pedido.productos[productoIndex];
-
         const producto = await Producto.findById(req.params.productoId);
-
-        if (!producto) {
-            return res.status(404).json({
-                mensaje: "Producto no encontrado"
-            });
-        }
+        if (!producto) return res.status(404).json({ mensaje: "Producto no encontrado" });
 
         producto.stock += productoPedido.cantidad;
         pedido.productos.splice(productoIndex, 1);
@@ -1347,80 +916,39 @@ app.delete("/api/pedidos/:id/productos/:productoId", async (req, res) => {
 
         await producto.save();
         await pedido.save();
-
-        res.json({
-            mensaje: "Producto eliminado del pedido correctamente",
-            pedido: pedido
-        });
-
+        res.json({ mensaje: "Producto eliminado del pedido correctamente", pedido: pedido });
     } catch (error) {
-        res.status(500).json({
-            mensaje: "Error al eliminar el producto del pedido",
-            error: error.message
-        });
+        res.status(500).json({ mensaje: "Error al eliminar el producto del pedido", error: error.message });
     }
 });
 
 app.put("/api/pedidos/:id/horario", async (req, res) => {
     try {
         const { fechaRetiro, horaRetiro } = req.body;
-
         if (!fechaRetiro || !horaRetiro) {
-            return res.status(400).json({
-                mensaje: "La fecha y hora de retiro son obligatorias"
-            });
+            return res.status(400).json({ mensaje: "La fecha y hora de retiro son obligatorias" });
         }
 
         const pedido = await Pedido.findById(req.params.id);
-
-        if (!pedido) {
-            return res.status(404).json({
-                mensaje: "Pedido no encontrado"
-            });
-        }
+        if (!pedido) return res.status(404).json({ mensaje: "Pedido no encontrado" });
 
         if (pedido.estado !== "pendiente") {
-            return res.status(400).json({
-                mensaje: "El pedido no se puede modificar en su estado actual",
-                estadoActual: pedido.estado
-            });
+            return res.status(400).json({ mensaje: "El pedido no se puede modificar en su estado actual", estadoActual: pedido.estado });
         }
 
         const localId = pedido.localId || req.body.localId;
+        const nuevoBloque = await buscarBloqueHorario(fechaRetiro, horaRetiro, localId);
+        if (!nuevoBloque) return res.status(400).json({ mensaje: `No existe un bloque que incluya las ${horaRetiro}.` });
 
-        const nuevoBloque = await buscarBloqueHorario(
-            fechaRetiro,
-            horaRetiro,
-            localId
-        );
-
-        if (!nuevoBloque) {
-            return res.status(400).json({
-                mensaje: `No existe un bloque que incluya las ${horaRetiro}.`
-            });
-        }
-
-        const bloqueAnterior = await buscarBloqueHorario(
-            pedido.fechaRetiro,
-            pedido.horaRetiro,
-            localId
-        );
-
-        if (!bloqueAnterior) {
-            return res.status(400).json({
-                mensaje: "No se encontró el bloque horario actual del pedido"
-            });
-        }
+        const bloqueAnterior = await buscarBloqueHorario(pedido.fechaRetiro, pedido.horaRetiro, localId);
+        if (!bloqueAnterior) return res.status(400).json({ mensaje: "No se encontró el bloque horario actual del pedido" });
 
         if (
             bloqueAnterior._id.toString() === nuevoBloque._id.toString() &&
             pedido.horaRetiro === horaRetiro &&
             new Date(pedido.fechaRetiro).getTime() === new Date(fechaRetiro).getTime()
         ) {
-            return res.json({
-                mensaje: "El pedido ya tiene ese horario",
-                pedido: pedido
-            });
+            return res.json({ mensaje: "El pedido ya tiene ese horario", pedido: pedido });
         }
 
         if (nuevoBloque.reservadas >= nuevoBloque.capacidad) {
@@ -1431,10 +959,7 @@ app.put("/api/pedidos/:id/horario", async (req, res) => {
             });
         }
 
-        if (bloqueAnterior.reservadas > 0) {
-            bloqueAnterior.reservadas -= 1;
-        }
-
+        if (bloqueAnterior.reservadas > 0) bloqueAnterior.reservadas -= 1;
         nuevoBloque.reservadas += 1;
 
         pedido.fechaRetiro = new Date(fechaRetiro);
@@ -1448,25 +973,15 @@ app.put("/api/pedidos/:id/horario", async (req, res) => {
             mensaje: `Horario del pedido modificado correctamente. Nuevo bloque: ${nuevoBloque.horaInicio} - ${nuevoBloque.horaFin}.`,
             pedido: pedido
         });
-
     } catch (error) {
-        res.status(500).json({
-            mensaje: "Error al modificar el horario del pedido",
-            error: error.message
-        });
+        res.status(500).json({ mensaje: "Error al modificar el horario del pedido", error: error.message });
     }
 });
 
 app.post("/api/horarios", async (req, res) => {
     try {
         const { localId, fecha, horaInicio, horaFin, capacidad } = req.body;
-        const nuevoBloque = new BloqueHorario({
-            localId,
-            fecha,
-            horaInicio,
-            horaFin,
-            capacidad
-        });
+        const nuevoBloque = new BloqueHorario({ localId, fecha, horaInicio, horaFin, capacidad });
         await nuevoBloque.save();
         res.status(201).json(nuevoBloque);
     } catch (error) {
@@ -1479,10 +994,7 @@ app.get("/api/horarios", async (req, res) => {
         const horarios = await BloqueHorario.find();
         res.json(horarios);
     } catch (error) {
-        res.status(500).json({
-            mensaje: "Error al obtener los horarios",
-            error: error.message
-        });
+        res.status(500).json({ mensaje: "Error al obtener los horarios", error: error.message });
     }
 });
 
@@ -1490,23 +1002,19 @@ app.get("/api/horarios", async (req, res) => {
 // GESTIÓN DE HORARIOS PARA EL DASHBOARD ADMIN
 // ================================================================
 
-// 1. Obtener todos los bloques horarios de un local para una fecha específica
 app.get("/api/horarios/admin", async (req, res) => {
     try {
         const { localId, fecha } = req.query;
-        if (!localId || !fecha) {
-            return res.status(400).json({ mensaje: "localId y fecha son requeridos." });
-        }
+        if (!localId || !fecha) return res.status(400).json({ mensaje: "localId y fecha son requeridos." });
 
         const inicioDia = new Date(fecha);
         inicioDia.setUTCHours(0,0,0,0);
-        
         const finDia = new Date(fecha);
         finDia.setUTCHours(23,59,59,999);
 
         const horarios = await BloqueHorario.find({
             localId,
-            fecha: { $gte: inicioDia,$lte: finDia }
+            fecha: { $gte: inicioDia, $lte: finDia }
         }).sort({ horaInicio: 1 });
 
         res.json(horarios);
@@ -1515,7 +1023,6 @@ app.get("/api/horarios/admin", async (req, res) => {
     }
 });
 
-// 2. Habilitar/Deshabilitar o Modificar un Bloque Horario
 app.put("/api/horarios/:id", async (req, res) => {
     try {
         const { activo, capacidad } = req.body;
@@ -1530,9 +1037,7 @@ app.put("/api/horarios/:id", async (req, res) => {
             { new: true }
         );
 
-        if (!bloqueActualizado) {
-            return res.status(404).json({ mensaje: "Bloque horario no encontrado" });
-        }
+        if (!bloqueActualizado) return res.status(404).json({ mensaje: "Bloque horario no encontrado" });
 
         res.json({
             ok: true,
@@ -1544,7 +1049,6 @@ app.put("/api/horarios/:id", async (req, res) => {
     }
 });
 
-// Actualizar el filtro de búsqueda de horarios disponibles del bot/cliente para ignorar bloques inactivos
 app.get("/api/horarios/disponibles/:fecha", async (req, res) => {
     try {
         const { localId } = req.query;
@@ -1555,15 +1059,14 @@ app.get("/api/horarios/disponibles/:fecha", async (req, res) => {
         finDia.setUTCHours(23,59,59,999);
 
         const filtro = {
-            fecha: { $gte: inicioDia,$lte: finDia },
-            activo: true, // Solo bloques habilitados
-            $expr: {$lt: ["$reservadas", "$capacidad"] }
+            fecha: { $gte: inicioDia, $lte: finDia },
+            activo: true,
+            $expr: { $lt: ["$reservadas", "$capacidad"] }
         };
 
         if (localId) filtro.localId = localId;
 
         const horarios = await BloqueHorario.find(filtro).sort({ horaInicio: 1 });
-
         const horariosDisponibles = horarios.map(horario => ({
             id: horario._id,
             horaInicio: horario.horaInicio,
@@ -1577,17 +1080,10 @@ app.get("/api/horarios/disponibles/:fecha", async (req, res) => {
     }
 });
 
-// ================================================================
-// GESTIÓN DE HORARIOS Y GENERACIÓN DE JORNADA DE 30 MIN
-// ================================================================
-
-// Generar o completar la jornada completa de 10:00 a 20:00 en bloques de 30 min
 app.post("/api/horarios/generar-jornada", async (req, res) => {
     try {
         const { localId, fecha, capacidadInicial = 5 } = req.body;
-        if (!localId || !fecha) {
-            return res.status(400).json({ mensaje: "El localId y la fecha son obligatorios." });
-        }
+        if (!localId || !fecha) return res.status(400).json({ mensaje: "El localId y la fecha son obligatorios." });
 
         const inicioDia = new Date(fecha);
         inicioDia.setUTCHours(0, 0, 0, 0);
@@ -1598,10 +1094,8 @@ app.post("/api/horarios/generar-jornada", async (req, res) => {
         let horaActual = 10;
         let minutoActual = 0;
 
-        // Bucle desde las 10:00 hasta las 20:00
         while (horaActual < 20) {
             const hInicioStr = `${String(horaActual).padStart(2, '0')}:${String(minutoActual).padStart(2, '0')}`;
-            
             let horaFin = horaActual;
             let minutoFin = minutoActual + 30;
             if (minutoFin >= 60) {
@@ -1610,10 +1104,9 @@ app.post("/api/horarios/generar-jornada", async (req, res) => {
             }
             const hFinStr = `${String(horaFin).padStart(2, '0')}:${String(minutoFin).padStart(2, '0')}`;
 
-            // Verificar si el bloque ya existe para no duplicarlo
             const existe = await BloqueHorario.findOne({
                 localId,
-                fecha: { $gte: inicioDia,$lte: finDia },
+                fecha: { $gte: inicioDia, $lte: finDia },
                 horaInicio: hInicioStr
             });
 
@@ -1642,7 +1135,7 @@ app.post("/api/horarios/generar-jornada", async (req, res) => {
 
         const todosLosBloques = await BloqueHorario.find({
             localId,
-            fecha: { $gte: inicioDia,$lte: finDia }
+            fecha: { $gte: inicioDia, $lte: finDia }
         }).sort({ horaInicio: 1 });
 
         res.json({
@@ -1658,11 +1151,6 @@ app.post("/api/horarios/generar-jornada", async (req, res) => {
     }
 });
 
-// ================================================================
-// GESTIÓN RÁPIDA DE STOCK Y ESTADO DE PRODUCTOS
-// ================================================================
-
-// Actualizar Stock, Precio y Estado de un Producto
 app.put("/api/productos/:id/stock", async (req, res) => {
     try {
         const { stock, activo, precio } = req.body;
@@ -1678,9 +1166,7 @@ app.put("/api/productos/:id/stock", async (req, res) => {
             { new: true }
         );
 
-        if (!producto) {
-            return res.status(404).json({ mensaje: "Producto no encontrado" });
-        }
+        if (!producto) return res.status(404).json({ mensaje: "Producto no encontrado" });
 
         res.json({
             ok: true,
@@ -1692,8 +1178,6 @@ app.put("/api/productos/:id/stock", async (req, res) => {
     }
 });
 
-
-// Endpoint del bot con middleware de suscripción y aislamiento por localId
 app.post("/api/bot", validarSuscripcion, async (req, res) => {
     try {
         const { telefono, mensaje } = req.body;
@@ -1701,15 +1185,9 @@ app.post("/api/bot", validarSuscripcion, async (req, res) => {
         const localId = local._id;
         const responder = datos => res.json({ local: local.nombre, ...datos });
 
-        if (!telefono || !mensaje) {
-            return res.status(400).json({ mensaje: "El teléfono y mensaje son obligatorios" });
-        }
+        if (!telefono || !mensaje) return res.status(400).json({ mensaje: "El teléfono y mensaje son obligatorios" });
 
-        let carrito = await Carrito.findOne({
-            "cliente.telefono": telefono,
-            localId,
-            estado: "activo"
-        });
+        let carrito = await Carrito.findOne({ "cliente.telefono": telefono, localId, estado: "activo" });
 
         if (!carrito) {
             carrito = new Carrito({
@@ -1725,36 +1203,27 @@ app.post("/api/bot", validarSuscripcion, async (req, res) => {
         const texto = mensaje.toLowerCase().trim();
         const intencion = detectarIntencion(texto);
 
-        if (intencion === "saludo") {
-            return responder({ respuesta: "¡Hola! 👋 Bienvenido a nuestra tienda." });
-        }
+        if (intencion === "saludo") return responder({ respuesta: "¡Hola! 👋 Bienvenido a nuestra tienda." });
 
         if (intencion === "consultar_catalogo") {
-            if (productosDisponibles.length === 0) {
-                return responder({ respuesta: "En este momento no tenemos productos disponibles." });
-            }
+            if (productosDisponibles.length === 0) return responder({ respuesta: "En este momento no tenemos productos disponibles." });
 
             let respuesta = "Estos son nuestros productos disponibles:\n";
             for (const producto of productosDisponibles) {
                 respuesta += `• ${producto.nombre} — $${producto.precio}\n`;
                 if (producto.descripcion) respuesta += `  ${producto.descripcion}\n`;
             }
-
             return responder({ respuesta, productos: productosDisponibles });
         }
 
         if (intencion === "consultar_carrito") {
-            if (carrito.productos.length === 0) {
-                return responder({ respuesta: "Tu carrito está vacío." });
-            }
+            if (carrito.productos.length === 0) return responder({ respuesta: "Tu carrito está vacío." });
 
             let respuesta = "Tu carrito tiene:\n";
             for (const item of carrito.productos) {
-                const subtotal = item.precioUnitario * item.cantidad;
-                respuesta += `• ${item.cantidad} ${item.nombre} — $${subtotal}\n`;
+                respuesta += `• ${item.cantidad} ${item.nombre} — $${item.precioUnitario * item.cantidad}\n`;
             }
             respuesta += `\nTotal: $${carrito.total}`;
-
             return responder({ respuesta, carrito });
         }
 
@@ -1772,77 +1241,52 @@ app.post("/api/bot", validarSuscripcion, async (req, res) => {
 
         if (intencion === "ingresar_direccion") {
             const direccion = detectarDireccion(texto);
-            if (!direccion) {
-                return responder({ respuesta: "No pude identificar la dirección. Escríbela, por ejemplo: mi dirección es Avenida Brasil 123." });
-            }
+            if (!direccion) return responder({ respuesta: "No pude identificar la dirección. Escríbela, por ejemplo: mi dirección es Avenida Brasil 123." });
 
             carrito.direccion = direccion;
             await carrito.save();
-
             return responder({ respuesta: `Perfecto. Guardé tu dirección de delivery: ${direccion}.`, carrito });
         }
 
         if (intencion === "seleccionar_fecha") {
             const fecha = detectarFecha(texto);
-            if (!fecha) {
-                return responder({ respuesta: "Indícame la fecha. Por ejemplo: hoy, mañana o pasado mañana." });
-            }
+            if (!fecha) return responder({ respuesta: "Indícame la fecha. Por ejemplo: hoy, mañana o pasado mañana." });
 
             carrito.fechaRetiro = fecha;
             await carrito.save();
-
             return responder({ respuesta: `Perfecto. La fecha seleccionada es ${fecha.toLocaleDateString("es-CL")}.`, carrito });
         }
 
         if (intencion === "horario" || texto.includes("hora") || detectarHora(texto)) {
             const hora = detectarHora(texto);
-            if (!hora) {
-                return responder({ respuesta: "Por favor indica una hora válida (ejemplo: 12:30 o 14:00)." });
-            }
+            if (!hora) return responder({ respuesta: "Por favor indica una hora válida (ejemplo: 12:30 o 14:00)." });
 
-            if (!carrito.fechaRetiro) {
-                return responder({ respuesta: "Primero debes seleccionar una fecha (por ejemplo: hoy o mañana)." });
-            }
+            if (!carrito.fechaRetiro) return responder({ respuesta: "Primero debes seleccionar una fecha (por ejemplo: hoy o mañana)." });
 
             const horario = await buscarBloqueHorario(carrito.fechaRetiro, hora, localId);
-            if (!horario) {
-                return responder({ respuesta: `No encontré un bloque horario disponible que incluya las ${hora} para esta fecha.` });
-            }
+            if (!horario) return responder({ respuesta: `No encontré un bloque horario disponible que incluya las ${hora} para esta fecha.` });
 
             if (horario.reservadas >= horario.capacidad) {
-                return responder({
-                    respuesta: `Lo sentimos, el bloque de ${horario.horaInicio} a ${horario.horaFin} está agotado. Por favor selecciona otro horario.`
-                });
+                return responder({ respuesta: `Lo sentimos, el bloque de ${horario.horaInicio} a ${horario.horaFin} está agotado.` });
             }
 
             carrito.horaRetiro = hora;
             await carrito.save();
-
-            return responder({
-                respuesta: `Perfecto. Reservaremos la hora ${hora}, dentro del bloque ${horario.horaInicio} - ${horario.horaFin}.`,
-                carrito
-            });
+            return responder({ respuesta: `Perfecto. Reservaremos la hora ${hora}, dentro del bloque ${horario.horaInicio} - ${horario.horaFin}.`, carrito });
         }
 
         if (intencion === "seleccionar_pago") {
             const metodoPago = detectarMetodoPago(texto);
-            if (!metodoPago) {
-                return responder({ respuesta: "Indícame el método de pago: efectivo, transferencia o tarjeta (Webpay)." });
-            }
+            if (!metodoPago) return responder({ respuesta: "Indícame el método de pago: efectivo, transferencia o tarjeta (Webpay)." });
 
             carrito.metodoPago = metodoPago;
             await carrito.save();
-
             return responder({ respuesta: `Perfecto. El método de pago seleccionado es ${metodoPago}.`, carrito });
         }
 
         if (intencion === "confirmacion") {
             const confirmacion = detectarConfirmacion(texto);
-
-            if (confirmacion === false) {
-                return responder({ respuesta: "Pedido cancelado. Tu carrito sigue disponible.", carrito });
-            }
-
+            if (confirmacion === false) return responder({ respuesta: "Pedido cancelado. Tu carrito sigue disponible.", carrito });
             if (carrito.productos.length === 0) return responder({ respuesta: "Tu carrito está vacío." });
             if (!carrito.tipoEntrega) return responder({ respuesta: "Primero debes seleccionar retiro o delivery." });
             if (carrito.tipoEntrega === "delivery" && !carrito.direccion) return responder({ respuesta: "Para delivery necesito tu dirección." });
@@ -1900,10 +1344,7 @@ app.post("/api/bot", validarSuscripcion, async (req, res) => {
                 `Hora: ${pedido.horaRetiro}\n` +
                 `Pago: ${pedido.metodoPago}\n\n`;
 
-            if (urlPago) {
-                textoRespuesta += `💳 Para completar tu pago con Webpay, ingresa al enlace:\n${urlPago}\n\n`;
-            }
-
+            if (urlPago) textoRespuesta += `💳 Para completar tu pago con Webpay, ingresa al enlace:\n${urlPago}\n\n`;
             textoRespuesta += `Gracias por tu compra.`;
 
             return responder({ respuesta: textoRespuesta, pedido, urlPago });
@@ -1923,9 +1364,7 @@ app.post("/api/bot", validarSuscripcion, async (req, res) => {
         const productosDetectados = detectarProductos(texto, productosDisponibles);
         if (productosDetectados.length > 0) {
             const validacion = await validarStockProductos(carrito, productosDetectados, productosDisponibles);
-            if (!validacion.ok) {
-                return responder({ respuesta: validacion.mensaje });
-            }
+            if (!validacion.ok) return responder({ respuesta: validacion.mensaje });
 
             for (const item of validacion.productos) {
                 await agregarProductoAlCarrito(carrito, item.producto, item.cantidad);
@@ -1937,9 +1376,7 @@ app.post("/api/bot", validarSuscripcion, async (req, res) => {
             });
         }
 
-        return responder({
-            respuesta: "No logré entender tu mensaje. Escribe 'catálogo' para ver nuestros productos o indica el producto que deseas."
-        });
+        return responder({ respuesta: "No logré entender tu mensaje. Escribe 'catálogo' para ver nuestros productos o indica el producto que deseas." });
 
     } catch (error) {
         console.error("Error en bot:", error);
@@ -1947,7 +1384,6 @@ app.post("/api/bot", validarSuscripcion, async (req, res) => {
     }
 });
 
-// Endpoint de retorno desde Webpay
 app.all("/api/pagos/confirmar", async (req, res) => {
     try {
         const body = req.body || {};
@@ -1957,12 +1393,9 @@ app.all("/api/pagos/confirmar", async (req, res) => {
         const tbkToken = query.TBK_TOKEN || body.TBK_TOKEN;
         const tbkOrdenCompra = query.TBK_ORDEN_COMPRA || body.TBK_ORDEN_COMPRA;
 
-        // 1. EL USUARIO CANCELÓ EN LA PASARELA DE WEBPAY
         if (tbkToken && !tokenWs) {
             if (tbkOrdenCompra) {
                 const numeroPedido = Number(tbkOrdenCompra.replace("ORD", ""));
-                
-                // Marcar pedido como cancelado
                 const pedidoCancelado = await Pedido.findOneAndUpdate(
                     { numeroPedido: numeroPedido },
                     { $set: { estado: "cancelado" } },
@@ -1970,22 +1403,14 @@ app.all("/api/pagos/confirmar", async (req, res) => {
                 );
 
                 if (pedidoCancelado) {
-                    // Restablecer stock de productos
                     if (pedidoCancelado.productos) {
                         for (const item of pedidoCancelado.productos) {
-                            await Producto.findByIdAndUpdate(item.productoId, {
-                                $inc: { stock: item.cantidad }
-                            });
+                            await Producto.findByIdAndUpdate(item.productoId, { $inc: { stock: item.cantidad } });
                         }
                     }
 
-                    // Liberar cupo en el bloque horario
                     if (pedidoCancelado.fechaRetiro && pedidoCancelado.horaRetiro) {
-                        const horario = await buscarBloqueHorario(
-                            pedidoCancelado.fechaRetiro,
-                            pedidoCancelado.horaRetiro,
-                            pedidoCancelado.localId
-                        );
+                        const horario = await buscarBloqueHorario(pedidoCancelado.fechaRetiro, pedidoCancelado.horaRetiro, pedidoCancelado.localId);
                         if (horario && horario.reservadas > 0) {
                             horario.reservadas -= 1;
                             await horario.save();
@@ -2001,17 +1426,13 @@ app.all("/api/pagos/confirmar", async (req, res) => {
                 <body style="font-family: sans-serif; text-align: center; padding: 50px;">
                     <h1 style="color: #e74c3c;">Pago Cancelado ❌</h1>
                     <p>Has cancelado la operación en Webpay.</p>
-                    <p>Tu pedido ha sido cancelado y los productos han vuelto al inventario.</p>
                 </body>
                 </html>
             `);
         }
 
-        if (!tokenWs) {
-            return res.status(400).send("Token de transacción no recibido.");
-        }
+        if (!tokenWs) return res.status(400).send("Token de transacción no recibido.");
 
-        // 2. CONFIRMAR TRANSACCIÓN CON TRANSBANK
         let commitResponse;
         try {
             commitResponse = await confirmarTransaccion(tokenWs);
@@ -2030,9 +1451,7 @@ app.all("/api/pagos/confirmar", async (req, res) => {
 
         const numeroPedido = Number(commitResponse.buy_order.replace("ORD", ""));
 
-        // 3. PAGO APROBADO / AUTORIZADO
         if (commitResponse.status === "AUTHORIZED" && commitResponse.response_code === 0) {
-            
             const pedidoActualizado = await Pedido.findOneAndUpdate(
                 { numeroPedido: numeroPedido },
                 {
@@ -2051,13 +1470,9 @@ app.all("/api/pagos/confirmar", async (req, res) => {
                 { returnDocument: "after" }
             );
             
-            // 🔔 DISPARAR NOTIFICACIONES POST-PAGO
             if (pedidoActualizado) {
                 const local = await Local.findById(pedidoActualizado.localId);
-                if (local) {
-                    // Ejecutar de forma asíncrona para no congelar la respuesta web al usuario
-                    notificarPagoExitoso(pedidoActualizado, local);
-                }
+                if (local) notificarPagoExitoso(pedidoActualizado, local);
             }
 
             return res.status(200).send(`
@@ -2074,7 +1489,6 @@ app.all("/api/pagos/confirmar", async (req, res) => {
             `);
 
         } else {
-            // 4. PAGO RECHAZADO POR BANCO / WEBPAY
             const pedidoRechazado = await Pedido.findOneAndUpdate(
                 { numeroPedido: numeroPedido },
                 { $set: { estado: "rechazado" } },
@@ -2082,22 +1496,14 @@ app.all("/api/pagos/confirmar", async (req, res) => {
             );
 
             if (pedidoRechazado) {
-                // Restablecer stock
                 if (pedidoRechazado.productos) {
                     for (const item of pedidoRechazado.productos) {
-                        await Producto.findByIdAndUpdate(item.productoId, {
-                            $inc: { stock: item.cantidad }
-                        });
+                        await Producto.findByIdAndUpdate(item.productoId, { $inc: { stock: item.cantidad } });
                     }
                 }
 
-                // Liberar cupo en el bloque horario
                 if (pedidoRechazado.fechaRetiro && pedidoRechazado.horaRetiro) {
-                    const horario = await buscarBloqueHorario(
-                        pedidoRechazado.fechaRetiro,
-                        pedidoRechazado.horaRetiro,
-                        pedidoRechazado.localId
-                    );
+                    const horario = await buscarBloqueHorario(pedidoRechazado.fechaRetiro, pedidoRechazado.horaRetiro, pedidoRechazado.localId);
                     if (horario && horario.reservadas > 0) {
                         horario.reservadas -= 1;
                         await horario.save();
@@ -2123,23 +1529,16 @@ app.all("/api/pagos/confirmar", async (req, res) => {
     }
 });
 
-// Rutas de prueba para el bot con validación de parámetros
 app.get("/api/bot/prueba-cantidad", (req, res) => {
     const texto = req.query.texto || "";
-    const cantidad = detectarCantidad(texto);
-
-    res.json({
-        texto: texto,
-        cantidad: cantidad
-    });
+    res.json({ texto: texto, cantidad: detectarCantidad(texto) });
 });
 
 app.post("/api/bot/prueba-productos", async (req, res) => {
     try {
         const { texto } = req.body;
         const productosDisponibles = await Producto.find({ activo: true });
-        const productos = detectarProductos(texto, productosDisponibles); // ✅
-        res.json({ productos });
+        res.json({ productos: detectarProductos(texto, productosDisponibles) });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
@@ -2148,54 +1547,26 @@ app.post("/api/bot/prueba-productos", async (req, res) => {
 app.get("/api/bot/prueba-buscar-producto", async (req, res) => {
     const productoBuscado = req.query.producto || "";
     const producto = await buscarProducto(productoBuscado);
-
-    if (!producto) {
-        return res.json({
-            producto: null
-        });
-    }
-
-    res.json({
-        id: producto._id,
-        nombre: producto.nombre,
-        precio: producto.precio,
-        stock: producto.stock
-    });
+    if (!producto) return res.json({ producto: null });
+    res.json({ id: producto._id, nombre: producto.nombre, precio: producto.precio, stock: producto.stock });
 });
 
 app.get("/api/bot/prueba-intencion", (req, res) => {
     const texto = (req.query.texto || "").toLowerCase().trim();
-    const intencion = detectarIntencion(texto);
-
-    res.json({
-        texto: texto,
-        intencion: intencion
-    });
+    res.json({ texto: texto, intencion: detectarIntencion(texto) });
 });
 
 app.get("/api/bot/prueba-productos", (req, res) => {
     const texto = (req.query.texto || "").toLowerCase().trim();
-    const productos = detectarProductos(texto);
-
-    res.json({
-        texto: texto,
-        productos: productos
-    });
+    res.json({ texto: texto, productos: detectarProductos(texto) });
 });
 
 app.get("/api/bot/prueba-catalogo", async (req, res) => {
     try {
         const catalogo = await obtenerCatalogo();
-
-        res.json({
-            productos: catalogo
-        });
-
+        res.json({ productos: catalogo });
     } catch (error) {
-        res.status(500).json({
-            mensaje: "Error al obtener el catálogo",
-            error: error.message
-        });
+        res.status(500).json({ mensaje: "Error al obtener el catálogo", error: error.message });
     }
 });
 
@@ -2204,9 +1575,6 @@ app.delete("/api/pedidos/limpiar", async (req, res) => {
         await Pedido.deleteMany({});
         res.json({ mensaje: "Todos los pedidos han sido eliminados de la base de datos" });
     } catch (error) {
-        res.status(500).json({
-            mensaje: "Error al eliminar pedidos",
-            error: error.message
-        });
+        res.status(500).json({ mensaje: "Error al eliminar pedidos", error: error.message });
     }
 });
