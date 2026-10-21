@@ -58,16 +58,23 @@ const PORT = process.env.PORT || 3000;
 const rawMongoUri = process.env.MONGODB_URI || process.env.MONGO_URL || "";
 const MONGO_URI = rawMongoUri.trim().replace(/^["']|["']$/g, '');
 
-// 2. Inicializar Firebase Admin SDK
-const firebaseConfigRaw = process.env.FIREBASE_SERVICE_ACCOUNT;
+// 2. Inicializar Firebase Admin SDK (Soporta JSON plano o Base64)
+const firebaseEnv = process.env.FIREBASE_SERVICE_ACCOUNT_BASE64 || process.env.FIREBASE_SERVICE_ACCOUNT;
 
-if (!firebaseConfigRaw) {
-  console.log("⚠️ ATENCIÓN: La variable FIREBASE_SERVICE_ACCOUNT no está definida en Railway.");
+if (!firebaseEnv) {
+  console.log("⚠️ ATENCIÓN: La variable FIREBASE_SERVICE_ACCOUNT_BASE64 no está definida en Railway.");
 } else {
   try {
-    const serviceAccount = JSON.parse(firebaseConfigRaw);
-    
-    // Corregir los saltos de línea en la clave privada si vienen escapados
+    let serviceAccount;
+
+    // Si no empieza con '{', es una cadena codificada en Base64
+    if (!firebaseEnv.trim().startsWith("{")) {
+      const jsonDecodificado = Buffer.from(firebaseEnv.trim(), 'base64').toString('utf-8');
+      serviceAccount = JSON.parse(jsonDecodificado);
+    } else {
+      serviceAccount = JSON.parse(firebaseEnv);
+    }
+
     if (serviceAccount.private_key) {
       serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
     }
@@ -77,7 +84,7 @@ if (!firebaseConfigRaw) {
     });
     console.log("✅ Firebase Admin SDK inicializado correctamente.");
   } catch (err) {
-    console.error("❌ Error al parsear el JSON de FIREBASE_SERVICE_ACCOUNT:", err.message);
+    console.error("❌ Error al procesar la credencial de Firebase:", err.message);
   }
 }
 
