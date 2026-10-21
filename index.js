@@ -53,16 +53,20 @@ app.use("/api/admin", rutasAdmin);
 app.use(express.static("public"));
 const PORT = process.env.PORT || 3000;
 
-// Inicializar Firebase Admin SDK con la variable de entorno
-if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+// Inicialización de Firebase con logs de diagnóstico
+const firebaseConfigRaw = process.env.FIREBASE_SERVICE_ACCOUNT;
+
+if (!firebaseConfigRaw) {
+  console.log("⚠️ ATENCIÓN: La variable FIREBASE_SERVICE_ACCOUNT no está definida en Railway.");
+} else {
   try {
-    const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+    const serviceAccount = JSON.parse(firebaseConfigRaw);
     admin.initializeApp({
       credential: admin.credential.cert(serviceAccount)
     });
     console.log("✅ Firebase Admin SDK inicializado correctamente.");
   } catch (err) {
-    console.error("❌ Error al procesar FIREBASE_SERVICE_ACCOUNT:", err.message);
+    console.error("❌ Error al parsear el JSON de FIREBASE_SERVICE_ACCOUNT:", err.message);
   }
 }
 
