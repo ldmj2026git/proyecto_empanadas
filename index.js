@@ -71,7 +71,6 @@ if (!firebaseEnv) {
   try {
     let serviceAccount;
 
-    // Si no empieza con '{', es una cadena codificada en Base64
     if (!firebaseEnv.trim().startsWith("{")) {
       const jsonDecodificado = Buffer.from(firebaseEnv.trim(), 'base64').toString('utf-8');
       serviceAccount = JSON.parse(jsonDecodificado);
@@ -83,7 +82,6 @@ if (!firebaseEnv) {
       serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
     }
 
-    // Obtención segura de la función cert
     const certFn = (admin.credential && admin.credential.cert) 
       ? admin.credential.cert 
       : require("firebase-admin/app").cert;
