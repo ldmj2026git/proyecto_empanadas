@@ -66,6 +66,12 @@ if (!firebaseConfigRaw) {
 } else {
   try {
     const serviceAccount = JSON.parse(firebaseConfigRaw);
+    
+    // Corregir los saltos de línea en la clave privada si vienen escapados
+    if (serviceAccount.private_key) {
+      serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
+    }
+
     admin.initializeApp({
       credential: admin.credential.cert(serviceAccount)
     });
